@@ -1,0 +1,38 @@
+# test/test_trampoline.rb
+require "test_helper"
+require "suppify/trampoline"
+require "suppify/signature"
+
+class TestTrampoline < Test::Unit::TestCase
+  def setup
+    @exports = [
+      { "public" => "add",   "cname" => "sp_add",
+        "sig" => Suppify::Signature.new("mrb_int", [["mrb_int","a"],["mrb_int","b"]]) },
+      { "public" => "boom",  "cname" => "sp_boom",
+        "sig" => Suppify::Signature.new("void", []) },
+    ]
+    @c = Suppify::Trampoline.render(@exports)
+  end
+
+  def test_emits_extern_trampoline_calling_static
+    assert_match(/intptr_t add\(intptr_t a, intptr_t b\)/, @c)
+    assert_match(/return sp_add\(a, b\);/, @c)
+  end
+
+  def test_void_trampoline_has_no_return_value
+    assert_match(/void boom\(void\)/, @c)
+    assert_match(/sp_boom\(\);/, @c)
+  end
+
+  def test_includes_exception_barrier_and_error_api
+    assert_match(/setjmp/, @c)
+    assert_match(/sp_exc_arm/, @c)
+    assert_match(/int suppi_error\(void\)/, @c)
+    assert_match(/const char \*suppi_error_message\(void\)/, @c)
+  end
+
+  def test_includes_sp_lib_init
+    assert_match(/void sp_lib_init\(void\)/, @c)
+    assert_match(/sp__main\(1, av\);/, @c)
+  end
+end
