@@ -4,3 +4,4 @@ module Suppify
   class NonNeutralType < Error; end
 end
 require "suppify/json_parser"
+require "suppify/symbol_map"
