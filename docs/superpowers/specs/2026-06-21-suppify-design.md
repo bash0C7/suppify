@@ -28,8 +28,6 @@
 
 ### 非目的（v1 でやらないこと）
 - spinel への PR / fork（将来 utility として上流提案する余地は残すが、依存しない）。
-- インスタンスメソッド / クラスメソッドのエクスポート（`self` がクラス依存の C 型になるため v2 以降）。
-- 非スカラー境界（poly / オブジェクト / ブロック `sp_Proc*`）のエクスポート。
 - マルチ arch ビルド・xcframework・各ターゲットの glue（iOS Swift bridge / PicoRuby mrbgem / ESP32 CMake）。これらは suppify の出力（中立 `.a` + header）を消費する後続フェーズ。
 - 完全な例外伝播（v1 はエラーフラグ方式で host を abort させないことを保証するに留める）。
 - **prebuilt native バイナリの配布**（out of scope）。利用者が自分で spinel ビルドして使う（§12）。
@@ -49,10 +47,10 @@ exe か lib かの**分岐をコンパイラ本体に持たせない**。spinel 
         └─ app.symbols.json  （C 名 ↔ Ruby 名 ↔ kind）
 
 [suppify — 外部ツール（Ruby 実装）]
-  app.c + app.symbols.json
-   → ① signature 抽出（app.c をパース）
-   → ② 中立スカラー関数のみ選別（kind=toplevel）
-   → ③ トランポリン + sp_lib_init を app.c 末尾へ追記
+  app.c + app.symbols.json + app.rb（prism で parse）
+   → ① prism(app.rb) で public メソッドを判定し export 集合を決定
+   → ② export 各々を symbols.json で cname 解決、app.c から signature 抽出
+   → ③ public はトランポリン+header で公開 / private は static のまま隠蔽。sp_lib_init を app.c 末尾へ追記
    → ④ int main(...) を static int sp__main(...) へ rename
    → ⑤ header (libname.h) 生成
    → ⑥ cc -c → ar
@@ -82,22 +80,21 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 
 ---
 
-## 5. v1 スコープの絞り込み
+## 5. export 対象の決定（Ruby 可視性ベース）
 
-**エクスポート対象 = `kind == "toplevel"` かつ全引数・戻り値がスカラー**の関数のみ。
+**export 対象 = ソースの public メソッド。private は隠蔽。** スコープを人手で宣言（`--export`）も型で自動推定もしない。Ruby が既に `public` / `private` で公開意図を宣言しているので、それに従う。
 
-- スカラー型: `mrb_int`（= intptr_t）/ `double` / `const char *` / bool。Swift とも PicoRuby/C とも素直に橋渡しできる。
-- トップレベル関数なら `self` もブロックも無く、`static <scalar> sp_<name>(<scalar...>) {` という規則的な形に揃う → パーサが単純かつ壊れにくい。
-- 非スカラー・インスタンスメソッド・クラスメソッドは警告して対象外（リンクはされるが header に出さない）。
-- 利用側の規約: **エクスポートしたい関数はトップレベルでスカラー入出力にする**。
+- **判定は prism で app.rb を静的 parse** して public メソッド集合を得る（prism は spinel 自身が parse に使う libprism。§12）。public → extern トランポリン＋header、private → 生成 C の `static` のまま `.a` 内に隠蔽。これは C の可視性そのもの（extern=公開 / static=内部）。
+- **動的可視性操作の取りこぼしは実害なし**: runtime での可視性変更（`eval` / runtime `define_method` / `send` 経由）は spinel が AOT できない領域とほぼ一致するため、spinel でコンパイルできる subset 内では静的 parse が正確。
+- **非 C 表現な public メソッドはエラー**: public と宣言された関数のシグネチャが中立 C で表現できない（Ruby オブジェクト / Array / Hash 返し、ユーザ定義クラスの opaque な self 等）場合、その export をエラーにする（黙って外さない）。これは scope line ではなく C 境界の物理（§7）に対する明示要求の検証。
 
 ---
 
 ## 6. 組み立て手順（すべて suppify 内・Ruby 実装、Python 不使用）
 
 1. `spinel app.rb -c -o <tmp>/app.c --emit-symbol-map` を実行。
-2. `app.symbols.json` から `kind=toplevel` を列挙し、`app.c` から各 `cname` 定義のシグネチャを抽出。
-3. スカラーのみの関数を選別（非スカラーは警告ログ）。
+2. **prism で app.rb を parse** し public メソッド集合（= export 対象）を決定（§5）。
+3. export 各々を `app.symbols.json` で `cname` 解決し、`app.c` から signature 抽出。中立 C で表現不能な public 関数はエラー（§5）。
 4. **`app.c` 末尾にトランポリンを追記**（同一翻訳単位なので `static` 関数を呼べる）。例外バリアは spinel runtime に既存の `sp_exc_arm` / `sp_exc_disarm`（`lib/sp_runtime.h:5214`）を使用 → **runtime も無改変**。
 
    ```c
@@ -160,7 +157,7 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 
 ### (1) Ruby レイヤー unit test（主）
 - **test-unit** gem を **bundler で repo ローカル管理**（`vendor/bundle`、いつものパターン）。dev / CI とも CRuby で実行。
-- 対象: 自作 JSON パーサ、シグネチャ抽出（C 定義行のパース）、トランポリン / header / `sp_lib_init` 生成、main rename、中立スカラー選別。suppify のロジックを CRuby 上で直接駆動して検証する。
+- 対象: prism による public 判定（export 集合決定）、自作 JSON パーサ、シグネチャ抽出（C 定義行のパース）、トランポリン / header / `sp_lib_init` 生成、main rename。suppify のロジックを CRuby 上で直接駆動して検証する。
 - 注: suppify 本体ソースは spinel subset 準拠（§12）。CRuby はその superset なので subset 準拠コードはそのまま CRuby でも動き、unit test が成立する。
 
 ### (2) spinel ビルド E2E（usage ＋適合性）
@@ -207,6 +204,8 @@ suppify は spinel に対して **git レベルの依存を持たない**（subm
 
 - **実装言語: Ruby、spinel supported subset 準拠**。suppify 自身を spinel でコンパイルして 1 つの native バイナリにするため、suppify ソースは spinel が AOT できる subset に収める。
 - **避ける機能**（spinel 非対応・`docs/limitations.md`）: `eval` / reflection / `method_missing` / runtime `define_method` / `ObjectSpace` / `Marshal`。`JSON.parse` も無いため、**symbols.json 用の最小 JSON パーサを subset 準拠で自作**する（`JSON.generate` は組み込みで使える）。subprocess は backtick `` `cmd` `` ＋ `$?`、stderr は `2>&1` リダイレクトで捕捉。`require "optparse"` / `require "set"` は spinel の stub が使える。
+- **prism 依存**: app.rb の可視性判定に prism を使う（§5）。CRuby テスト層は `prism` gem、spinel-native バイナリは **libprism を C リンク**（spinel 自身が parse に使う C ライブラリ。Ruby インタプリタは不要、parser を 1 本リンクするだけ）。
+- **CLI**: `suppify app.rb -o <name>` のみ。公開面を指定するフラグ（`--export` 等）は持たない — 公開面はソースの可視性（§5）で決まる。
 - **配布方針**: prebuilt バイナリは配らない（out of scope）。**usage = 利用者が `spinel suppify.rb -o suppify` でビルドし、その native バイナリを使う**。CRuby ランタイムでの実行 fallback は提供しない（CRuby は §9 のテストのみ）。
 - **テスト依存**: test-unit を bundler で repo ローカル（`vendor/bundle`）管理。テストコード自体は CRuby 上で動けばよく subset 制約を受けないが、被テストの suppify 本体ソースは subset 準拠を保つ（§9(2) の spinel ビルド E2E がこれを CI で強制する）。
 
