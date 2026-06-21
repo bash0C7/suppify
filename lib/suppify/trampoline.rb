@@ -35,7 +35,9 @@ module Suppify
       else
         body << "    if (setjmp(jb)) { sp_exc_disarm(); g_suppi_err = 1; return 0; }\n"
         body << "    sp_exc_arm(jb);\n"
-        body << "    return #{e['cname']}(#{args});\n"
+        body << "    #{ret} r = #{e['cname']}(#{args});\n"
+        body << "    sp_exc_disarm();\n"
+        body << "    return r;\n"
       end
       body << "}\n"
       body

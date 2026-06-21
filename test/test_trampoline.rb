@@ -16,7 +16,10 @@ class TestTrampoline < Test::Unit::TestCase
 
   def test_emits_extern_trampoline_calling_static
     assert_match(/intptr_t add\(intptr_t a, intptr_t b\)/, @c)
-    assert_match(/return sp_add\(a, b\);/, @c)
+    assert_match(/intptr_t r = sp_add\(a, b\);/, @c)
+    # success path MUST disarm the setjmp barrier before returning, otherwise
+    # the local jmp_buf dangles after return (a later longjmp -> UB).
+    assert_match(/sp_exc_disarm\(\);\n\s*return r;/, @c)
   end
 
   def test_void_trampoline_has_no_return_value
