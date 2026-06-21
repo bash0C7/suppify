@@ -1,0 +1,7 @@
+# ephemeral spinel clones for tests/CI (never vendored)
+/tmp/
+/.spinel-cache/
+
+# build artifacts
+*.o
+*.a

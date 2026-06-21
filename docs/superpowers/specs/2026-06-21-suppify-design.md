@@ -134,6 +134,7 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 ## 7. 中立 ABI 契約
 
 - 境界に出してよい型はスカラーのみ（`mrb_int` / `double` / `const char *` / bool）。
+- **中立 header は spinel 型を漏らさない**: 公開プロトタイプでは `mrb_int` を標準型（`intptr_t` / `long long`）に、bool を `int` に写し、`sp_*` 型を一切含めない。これにより consumer（Swift / PicoRuby）は spinel の header を一切 include せずに済む。
 - 例外はホストを巻き込まず、`suppi_error()` / `suppi_error_message()` で問い合わせる方式に変換（v1）。完全な per-call 例外伝播は後続。
 - **`sp_lib_init()` は呼び出しスレッドで、浅いフレームから 1 度だけ**呼ぶ規約（GC のスタック基準確定のため）。
 
@@ -182,7 +183,16 @@ int main(void){
 
 ---
 
-## 11. 後続フェーズ（v1 の中立成果物を消費する）
+## 11. spinel への依存ポリシー
+
+suppify は spinel に対して **git レベルの依存を持たない**（submodule / subtree / vendoring いずれも禁止）。spinel は `cc` と同じ「インストール済み外部ツール」として扱う。
+
+- **実行時**: `spinel` バイナリと spinel の `lib/`（`sp_runtime.h` / `libspinel_rt.a`）を PATH / 環境変数 / `--spinel-bin` `--spinel-lib` で発見する。suppify は spinel のコピーを一切同梱しない。
+- **テスト / CI**: spinel ソースは **ephemeral な pinned clone**（gitignore した tmp ディレクトリへ tag 指定で clone → `make` → PATH に配置）でのみ用意する。§8 の version matrix ＋ master カナリアがこれを駆動する。suppify repo の依存ではなく CI のプロビジョニング手順。
+- **生成物（consumer 向け）は自己完結**: 出力バンドル = `lib<name>.a` ＋ **コピーした `libspinel_rt.a`** ＋ 中立 header。生成物を使う側（Swift / PicoRuby / ESP32）は spinel インストール不要。
+- **バージョン結合の明示**: suppify は parse によって spinel の出力形式に結合するため、「動作確認済み spinel バージョン一覧」をデータとして保持し、実行時に `spinel --version` を soft check して未検証バージョンなら warn する（git 依存ではなくデータ）。
+
+## 12. 後続フェーズ（v1 の中立成果物を消費する）
 
 1. インスタンス/クラスメソッド・非スカラー境界のエクスポート。
 2. マルチ arch ビルド（macOS arm64 / iOS device arm64 / iOS sim / ESP32 xtensa・riscv32）→ Apple 向け xcframework。
