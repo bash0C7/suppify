@@ -5,3 +5,4 @@ module Suppify
 end
 require "suppify/json_parser"
 require "suppify/symbol_map"
+require "suppify/visibility"
