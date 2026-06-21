@@ -32,6 +32,8 @@
 - 非スカラー境界（poly / オブジェクト / ブロック `sp_Proc*`）のエクスポート。
 - マルチ arch ビルド・xcframework・各ターゲットの glue（iOS Swift bridge / PicoRuby mrbgem / ESP32 CMake）。これらは suppify の出力（中立 `.a` + header）を消費する後続フェーズ。
 - 完全な例外伝播（v1 はエラーフラグ方式で host を abort させないことを保証するに留める）。
+- **prebuilt native バイナリの配布**（out of scope）。利用者が自分で spinel ビルドして使う（§12）。
+- **CRuby ランタイムでの実行 fallback**（提供しない）。CRuby は §9 のテストでのみ使う。
 
 ---
 
@@ -152,14 +154,21 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 
 ---
 
-## 9. テスト（TDD・ハーネス先行）
+## 9. テスト（TDD）
 
+テストは 2 層。**Ruby レイヤーの unit test を主戦場**にし、**spinel ビルドの E2E** を usage 検証＋ spinel 適合性検証として回す。
+
+### (1) Ruby レイヤー unit test（主）
+- **test-unit** gem を **bundler で repo ローカル管理**（`vendor/bundle`、いつものパターン）。dev / CI とも CRuby で実行。
+- 対象: 自作 JSON パーサ、シグネチャ抽出（C 定義行のパース）、トランポリン / header / `sp_lib_init` 生成、main rename、中立スカラー選別。suppify のロジックを CRuby 上で直接駆動して検証する。
+- 注: suppify 本体ソースは spinel subset 準拠（§12）。CRuby はその superset なので subset 準拠コードはそのまま CRuby でも動き、unit test が成立する。
+
+### (2) spinel ビルド E2E（usage ＋適合性）
 ```ruby
 # fixtures/add.rb
 def add(a, b) = a + b
 def boom     = raise "x"
 ```
-
 ```c
 /* harness.c */
 #include "libname.h"
@@ -169,8 +178,10 @@ int main(void){
     LIBNAME_boom(); printf("%d\n", suppi_error());  /* => 1 */
 }
 ```
+- 手順: `spinel suppify.rb -o suppify`（＝利用者の usage そのもの）→ その `suppify` バイナリで `fixtures/add.rb` を処理 → 出てきた `.a` ＋ header を `harness.c` にリンク → `5` と `1` が出れば Phase 1 ゲート通過。
+- この経路は同時に「**spinel が suppify を 1 バイナリに build できる**」適合性テストを兼ね、§8 の version matrix ＋ master カナリアがこれを駆動する。
 
-`5` と `1` が出れば Phase 1 のゲート通過。実装はこのハーネステストを先に書く。
+実装は (1)(2) のテストを先に書く（TDD）。
 
 ---
 
@@ -192,7 +203,14 @@ suppify は spinel に対して **git レベルの依存を持たない**（subm
 - **生成物（consumer 向け）は自己完結**: 出力バンドル = `lib<name>.a` ＋ **コピーした `libspinel_rt.a`** ＋ 中立 header。生成物を使う側（Swift / PicoRuby / ESP32）は spinel インストール不要。
 - **バージョン結合の明示**: suppify は parse によって spinel の出力形式に結合するため、「動作確認済み spinel バージョン一覧」をデータとして保持し、実行時に `spinel --version` を soft check して未検証バージョンなら warn する（git 依存ではなくデータ）。
 
-## 12. 後続フェーズ（v1 の中立成果物を消費する）
+## 12. 実装言語・ビルド・配布方針
+
+- **実装言語: Ruby、spinel supported subset 準拠**。suppify 自身を spinel でコンパイルして 1 つの native バイナリにするため、suppify ソースは spinel が AOT できる subset に収める。
+- **避ける機能**（spinel 非対応・`docs/limitations.md`）: `eval` / reflection / `method_missing` / runtime `define_method` / `ObjectSpace` / `Marshal`。`JSON.parse` も無いため、**symbols.json 用の最小 JSON パーサを subset 準拠で自作**する（`JSON.generate` は組み込みで使える）。subprocess は backtick `` `cmd` `` ＋ `$?`、stderr は `2>&1` リダイレクトで捕捉。`require "optparse"` / `require "set"` は spinel の stub が使える。
+- **配布方針**: prebuilt バイナリは配らない（out of scope）。**usage = 利用者が `spinel suppify.rb -o suppify` でビルドし、その native バイナリを使う**。CRuby ランタイムでの実行 fallback は提供しない（CRuby は §9 のテストのみ）。
+- **テスト依存**: test-unit を bundler で repo ローカル（`vendor/bundle`）管理。テストコード自体は CRuby 上で動けばよく subset 制約を受けないが、被テストの suppify 本体ソースは subset 準拠を保つ（§9(2) の spinel ビルド E2E がこれを CI で強制する）。
+
+## 13. 後続フェーズ（v1 の中立成果物を消費する）
 
 1. インスタンス/クラスメソッド・非スカラー境界のエクスポート。
 2. マルチ arch ビルド（macOS arm64 / iOS device arm64 / iOS sim / ESP32 xtensa・riscv32）→ Apple 向け xcframework。
