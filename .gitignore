@@ -5,3 +5,6 @@
 # build artifacts
 *.o
 *.a
+
+# bundler local install
+/vendor/bundle/
