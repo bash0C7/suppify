@@ -1,8 +1,8 @@
 # HANDOFF — suppify Plan 1
 
-状態: **進行中（Plan 1 の 14 タスク中 13 完了、Task 14 のみ未実行）**。
-branch `feat/suppify-core` に 14 commit、working tree clean、**全 43 テスト green**（CRuby + prism gem 上）。
-次にやること: Task 14（実機 spinel での E2E）を spinel インストール環境で実行 → 通れば Plan 1 完了 → `feat/suppify-core` を main へマージ。
+状態: **進行中（Plan 1 の 14 タスク全て実装済み、Task 14 は実機 spinel 未実行のため omit のまま）**。
+branch `feat/suppify-core` に 15 commit、working tree clean、**44 テスト中 43 green + 1 omission**（CRuby + prism gem 上。spinel が PATH に無いため `test/test_integration.rb` が自動 omit）。
+次にやること: spinel をインストールできる環境を用意し `bundle exec ruby -Ilib -Itest test/test_integration.rb` を実行 → PASS すれば Plan 1 完了 → `feat/suppify-core` を main へマージ。
 
 ## このリポジトリは何か
 
@@ -13,7 +13,7 @@ branch `feat/suppify-core` に 14 commit、working tree clean、**全 43 テス�
 
 ## できていること（当セッションの tool 実行で検証済み）
 
-`lib/suppify/` に 12 モジュール、`test/` に各ユニットテスト。`bundle exec rake test` → **43 tests / 73 assertions / 0 failures**。
+`lib/suppify/` に 12 モジュール、`test/` に各ユニットテスト + gated integration test。`bundle exec rake test` → **44 tests / 72 assertions / 0 failures / 1 omission**（omission = spinel 不在での Task 14）。
 
 | モジュール | 役割 |
 |---|---|
@@ -32,16 +32,16 @@ branch `feat/suppify-core` に 14 commit、working tree clean、**全 43 テス�
 
 ## まだ実証できていないこと（重要・正直に）
 
-- **実機 spinel での E2E は未実行**。この環境に spinel が PATH に無いため Task 14（`test/test_integration.rb`、spinel 不在時は自動 omit）を走らせられなかった。**「spinel 出力 → suppify → cc/ar → C ハーネスから呼べる」ことの経験的証明は未達**。証明済みなのは Ruby 変換層のロジックのみ。
+- **実機 spinel での E2E は未実行**。`test/fixtures/add.rb` と `test/test_integration.rb`（Task 14 の実体）はこのセッションで作成・commit 済みだが、この環境にも spinel が PATH に無いため実行できず自動 omit のまま。**「spinel 出力 → suppify → cc/ar → C ハーネスから呼べる」ことの経験的証明は未達**。証明済みなのは Ruby 変換層のロジックのみ。
+- spinel の入手元（clone URL・配布方法）は本 repo のどのドキュメントにも記載が無い。次回再開時は user に確認が必要。
 - Plan 2（未着手）: suppify 自身を spinel で 1 バイナリ化する自己ホスティング。最大の未検証点は「spinel-compiled バイナリが libprism を FFI で叩けるか」。これは Plan 2 冒頭の spike で判定する。Plan 1 はこれに依存しない。
 
 ## 再開手順
 
-1. spinel をインストールし PATH に通す（`SPINEL_LIB` も `libspinel_rt.a` / `sp_runtime.h` のあるディレクトリに設定可）。
+1. spinel の入手元を user に確認し、インストールして PATH に通す（`SPINEL_LIB` も `libspinel_rt.a` / `sp_runtime.h` のあるディレクトリに設定可）。
 2. `cd suppify && bundle install`（gem は `vendor/bundle` に入る）。
 3. `bundle exec ruby -Ilib -Itest test/test_integration.rb` で Task 14 を実行。期待: ハーネスが `5`（`add(2,3)`）と `1`（`boom` 例外で `suppi_error()==1`）を出力。
-4. 通れば Task 14 を commit（`test/fixtures/add.rb` は未作成 — Plan の Task 14 手順に従って作る）。
-5. Plan 1 完了。`feat/suppify-core` を main へマージ（push は user 承認後）。
+4. PASS を確認したら HANDOFF を更新。Plan 1 完了。`feat/suppify-core` を main へマージ（push は user 承認後）。
 
 ## 実装中に見つけた計画のバグ（修正済み）
 
