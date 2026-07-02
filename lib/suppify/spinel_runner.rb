@@ -7,12 +7,13 @@ module Suppify
       @runner = runner
     end
 
-    # spinel writes <basename>.symbols.json next to the -c output's basename.
+    # Real spinel treats `-c` and `--emit-symbol-map` as mutually exclusive
+    # emit modes (the symbol-map path short-circuits before the C-output
+    # branch), so the two artifacts require separate invocations.
     def emit(rb_path, c_path)
       symbols_path = c_path.sub(/\.c\z/, "") + ".symbols.json"
-      cmd = "#{@spinel_bin} #{rb_path} -c -o #{c_path} --emit-symbol-map"
-      out, status = @runner.call(cmd)
-      raise Error, "spinel failed (#{status}): #{out}" unless status == 0
+      run!("#{@spinel_bin} #{rb_path} -c -o #{c_path}")
+      run!("#{@spinel_bin} #{rb_path} --emit-symbol-map -o #{symbols_path}")
       { c_path: c_path, symbols_path: symbols_path }
     end
 
@@ -20,6 +21,13 @@ module Suppify
     def shell(cmd)
       out = `#{cmd} 2>&1`
       [out, $?.exitstatus]
+    end
+
+    private
+
+    def run!(cmd)
+      out, status = @runner.call(cmd)
+      raise Error, "spinel failed (#{status}): #{out}" unless status == 0
     end
   end
 end
