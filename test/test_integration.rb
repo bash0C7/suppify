@@ -16,6 +16,7 @@ class TestIntegration < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       rb = File.join(dir, "add.rb")
       FileUtils.cp(File.expand_path("fixtures/add.rb", __dir__), rb)
+      FileUtils.cp(File.expand_path("fixtures/add.rbs", __dir__), File.join(dir, "add.rbs"))
 
       Dir.chdir(dir) do
         assert_equal 0, Suppify::CLI.run([rb, "-o", "addlib"])

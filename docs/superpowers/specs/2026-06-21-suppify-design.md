@@ -88,12 +88,24 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 - **動的可視性操作の取りこぼしは実害なし**: runtime での可視性変更（`eval` / runtime `define_method` / `send` 経由）は spinel が AOT できない領域とほぼ一致するため、spinel でコンパイルできる subset 内では静的 parse が正確。
 - **非 C 表現な public メソッドはエラー**: public と宣言された関数のシグネチャが中立 C で表現できない（Ruby オブジェクト / Array / Hash 返し、ユーザ定義クラスの opaque な self 等）場合、その export をエラーにする（黙って外さない）。これは scope line ではなく C 境界の物理（§7）に対する明示要求の検証。
 
+### 5.1 spinel の whole-program DCE との非互換（実機検証で発覚・v1 で対処済み）
+
+実機 spinel（`src/analyze.c: compute_reachable`）は **プログラム内のどこからも呼ばれないトップレベルメソッドを、可視性に関係なく生成 C から丸ごと消す**。root はトップレベルスコープ（`main` 相当）・`initialize`・一部の暗黙呼び出しメソッド名のみで、そこから呼び出しグラフを BFS した到達範囲だけが生き残る。suppify が export したい public メソッドは定義上「プログラム内から呼ばれない」ため、素の `spinel app.rb -c` ではそれらの C 定義自体が存在しなくなる（symbol map には載るが本体が無い）。`--rbs DIR` で型シグネチャだけ与えても reachability には影響しない（advisory な型ヒントであり root 判定には関与しない。実験で確認済み）。
+
+**対処（`RootInjector` + `RbsSeed`、CLI から自動適用）**:
+
+1. 各 public メソッドについて `<input>.rbs` サイドカー（`class Object; def name: (T1, T2) -> R; end` 形式 — spinel 自身が `--rbs` でトップレベルメソッドを型付けする際に使う規約と同じ）で C シグネチャを宣言する。宣言が無い public メソッドは明確にエラー（黙って外さない、§5 の既存方針の延長）。
+2. spinel へ渡す直前に、ソースの末尾へ `if false; <method>(<RBS 型から作った literal 引数>); ...; end` を追記した「rooted」コピーを生成する。`if false` で括るのは、この呼び出しが **実行時には絶対に発火してはならない** ため（後述）。spinel の到達可能性判定（`cr_collect_calls`）は分岐の実行可能性を見ず、スコープ本体に呼び出しノードが構文的に存在するかだけを見るため、`if false` 内でも root 化の効果は変わらない（実験で確認済み）。
+3. `spinel <rooted.rb> --rbs <dir> -c -o <c>` を実行し、`--rbs` は型推論の後押し（特に戻り値型）に使う。
+
+**なぜ実行時に呼んではいけないか**: §6 の `sp_lib_init()` は renamed `main`（＝ソースのトップレベル全体）を **ライブラリロード時に 1 回そのまま実行**する。ダミー呼び出しが `if false` に包まれず素通しだと、`sp_lib_init()` 実行時に本物の副作用（例外送出等）が発火し、suppify のトランポリン例外バリア（§6 の `sp_exc_arm`）の外側で spinel ランタイムの素の unhandled-exception ハンドラに落ちてプロセスが壊れる（実機で実際に再現・修正済み）。`if false` で C 側も dead branch になるため `sp_lib_init()` 実行時は完全に無害。
+
 ---
 
 ## 6. 組み立て手順（すべて suppify 内・Ruby 実装、Python 不使用）
 
-1. `spinel app.rb -c -o <tmp>/app.c --emit-symbol-map` を実行。
-2. **prism で app.rb を parse** し public メソッド集合（= export 対象）を決定（§5）。
+1. **prism で app.rb を parse** し public メソッド集合（= export 対象）を決定（§5）。public メソッドが 1 つ以上あれば `<app>.rbs` サイドカーを読み、§5.1 の rooted コピーを作る。
+2. `spinel <rooted or original>.rb -c -o <tmp>/app.c`（rbs サイドカーがあれば `--rbs <dir>` を付与）と `spinel <同> --emit-symbol-map -o <tmp>/app.symbols.json` を **別々に**実行（実機 spinel は `-c` と `--emit-symbol-map` を排他モードとして扱うため。§付録）。
 3. export 各々を `app.symbols.json` で `cname` 解決し、`app.c` から signature 抽出。中立 C で表現不能な public 関数はエラー（§5）。
 4. **`app.c` 末尾にトランポリンを追記**（同一翻訳単位なので `static` 関数を呼べる）。例外バリアは spinel runtime に既存の `sp_exc_arm` / `sp_exc_disarm`（`lib/sp_runtime.h:5214`）を使用 → **runtime も無改変**。
 
@@ -229,3 +241,8 @@ suppify は spinel に対して **git レベルの依存を持たない**（subm
 - runtime 依存: libc + malloc。ucontext は Fiber のみ（aarch64/x86_64 は register-save asm で ucontext 不要、`lib/sp_fiber_ctx.h:26`）。iOS arm64 は素直、ESP32 は Fiber 不使用なら可。
 - 既存 metadata 出力フラグ: `--emit-symbol-map`（PR #1345 merged）/ `--emit-rbs`（#1276）/ `--emit-types`。`--emit-lib` 系 PR は存在しない。
 - Issue #1367（OPEN）: "library consumption needs a stable package identity" — 上流もライブラリ消費を未解決論点として認識。
+
+### 付録の訂正（実機 `https://github.com/matz/spinel`（master）で検証・上記の一部を上書き）
+
+- **`-c` と `--emit-symbol-map` は組み合わせ不可（排他モード）**: 上記「PR #1345 merged」は `--emit-symbol-map` 単体の存在は正しいが、`-c -o X --emit-symbol-map` は `X` に symbol-map JSON が書かれ **C ソースは生成されない**（`src/main.c`: emit モードが `-c` 分岐より先に early return する）。suppify は `-c` と `--emit-symbol-map` を別々に呼ぶ（§6 手順 2）。
+- **whole-program DCE は可視性を見ない**: `src/analyze.c: compute_reachable` はトップレベルスコープ・`initialize`・一部暗黙呼び出し名のみを root とし、呼ばれないトップレベルメソッドは public でも生成 C から消える。§5.1 の対処（RBS シード付きダミー呼び出し注入）が必要。

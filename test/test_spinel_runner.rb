@@ -30,4 +30,13 @@ class TestSpinelRunner < Test::Unit::TestCase
     r = Suppify::SpinelRunner.new(spinel_bin: "spinel", runner: fake)
     assert_raise(Suppify::Error) { r.emit("/work/app.rb", "/tmp/app.c") }
   end
+
+  def test_includes_rbs_flag_on_c_step_only_when_given
+    captured = []
+    fake = ->(cmd) { captured << cmd; ["", 0] }
+    r = Suppify::SpinelRunner.new(spinel_bin: "spinel", runner: fake, rbs_dir: "/work/sigs")
+    r.emit("/work/app.rb", "/tmp/app.c")
+    assert_match(%r{\Aspinel /work/app\.rb --rbs /work/sigs -c -o /tmp/app\.c\z}, captured[0])
+    assert_match(%r{\Aspinel /work/app\.rb --emit-symbol-map -o /tmp/app\.symbols\.json\z}, captured[1])
+  end
 end
