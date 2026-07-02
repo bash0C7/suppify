@@ -1,4 +1,7 @@
 class Object
   def add: (Integer, Integer) -> Integer
   def boom: () -> void
+  def half: (Float) -> Float
+  def greet: (String) -> String
+  def even: (Integer) -> bool
 end

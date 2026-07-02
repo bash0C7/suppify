@@ -6,10 +6,12 @@ module Suppify
     TABLE = {
       "mrb_int"       => "intptr_t",
       "double"        => "double",
+      "mrb_float"     => "double",
       "const char *"  => "const char *",
       "char *"        => "char *",
       "bool"          => "int",
       "_Bool"         => "int",
+      "mrb_bool"      => "int",
       "void"          => "void",
     }.freeze
 

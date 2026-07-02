@@ -13,6 +13,10 @@ class TestNeutralType < Test::Unit::TestCase
     assert_equal "double", map("double")
   end
 
+  def test_mrb_float_to_double
+    assert_equal "double", map("mrb_float")
+  end
+
   def test_const_char_ptr_passthrough
     assert_equal "const char *", map("const char *")
   end
@@ -20,6 +24,7 @@ class TestNeutralType < Test::Unit::TestCase
   def test_bool_to_int
     assert_equal "int", map("bool")
     assert_equal "int", map("_Bool")
+    assert_equal "int", map("mrb_bool")
   end
 
   def test_void_passthrough
