@@ -109,6 +109,16 @@ are shared C names across any suppify-built library. Linking two
 suppify-built libraries into the same binary will collide. v1 supports
 exactly one suppify library per consuming binary.
 
+### Constraint: no cross-compilation
+
+`suppify` only produces binaries for the host it runs on. `Builder`
+invokes a hardcoded `cc` (no `--cc=` / `CC` override, no target triple, no
+sysroot), and the bundled `libspinel_rt.a` is copied as-is from your local
+spinel build, so it's whatever architecture that build targeted. To
+produce output for a different target (e.g. an ESP32 toolchain, or an iOS
+device slice), you'd need to build spinel and run suppify natively for
+that target yourself — there's no built-in cross-compilation support yet.
+
 ## Example
 
 The steps below run strictly in this order — **no C code needs to exist
