@@ -85,6 +85,7 @@ module Suppify
       end
 
       def gem_init(init_func, exports)
+        final_func = init_func.sub(/_gem_init\z/, "_gem_final")
         b = +"void #{init_func}(mrb_state *mrb) {\n"
         b << "    sp_lib_init();\n"
         exports.each do |e|
@@ -92,7 +93,9 @@ module Suppify
           arity = e["sig"].params.length
           b << "    mrb_define_method(mrb, mrb->kernel_module, \"#{n}\", mrb_suppi_#{n}, MRB_ARGS_REQ(#{arity}));\n"
         end
-        b << "}\n"
+        b << "}\n\n"
+        # picoruby's aggregate gem_init.c calls both init and final.
+        b << "void #{final_func}(mrb_state *mrb) { (void)mrb; }\n"
         b
       end
     end

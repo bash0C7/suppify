@@ -70,4 +70,10 @@ class TestBindingMruby < Test::Unit::TestCase
     assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "add", \w+, MRB_ARGS_REQ\(2\)\);/, @c)
     assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "boom", \w+, MRB_ARGS_REQ\(0\)\);/, @c)
   end
+
+  # picoruby's generated gem_init.c references both _gem_init and _gem_final;
+  # the binding must define the (empty) final too or the firmware link fails.
+  def test_defines_gem_final
+    assert_match(/void mrb_picoruby_addlib_gem_final\(mrb_state \*mrb\)/, @c)
+  end
 end
