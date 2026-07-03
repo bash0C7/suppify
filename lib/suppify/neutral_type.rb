@@ -28,5 +28,22 @@ module Suppify
     rescue NonNeutralType
       false
     end
+
+    # Classifies a C type into a marshalling category the language bindings
+    # switch on. Raises (via map) on non-neutral types.
+    KIND = {
+      "intptr_t"     => :int,
+      "double"       => :float,
+      "const char *" => :string,
+      "char *"       => :string,
+      "int"          => :bool,
+      "void"         => :void,
+    }.freeze
+
+    def kind(c_type)
+      key = c_type.strip.gsub(/\s+/, " ")
+      neutral = TABLE[key] || key # spinel type -> neutral, or already neutral
+      KIND.fetch(neutral) { raise NonNeutralType, "non-neutral C type: #{c_type.inspect}" }
+    end
   end
 end

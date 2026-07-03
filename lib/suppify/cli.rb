@@ -5,27 +5,34 @@ require "suppify/pipeline"
 require "suppify/visibility"
 require "suppify/rbs_seed"
 require "suppify/root_injector"
+require "suppify/emitter/cruby_gem"
+require "suppify/emitter/picoruby_gem"
 
 module Suppify
   module CLI
     module_function
+
+    TARGETS = %w[c cruby picoruby].freeze
 
     # Minimal arg parsing (optparse-free so it compiles under spinel too).
     def parse(argv)
       input = nil
       lib_name = nil
       out_dir = "."
+      target = "c"
       i = 0
       while i < argv.length
         case argv[i]
         when "-o" then lib_name = argv[i + 1]; i += 2
         when "-d", "--out-dir" then out_dir = argv[i + 1]; i += 2
+        when "-t", "--target" then target = argv[i + 1]; i += 2
         else input = argv[i]; i += 1
         end
       end
-      raise Error, "usage: suppify <app.rb> [-o name] [-d out_dir]" unless input
+      raise Error, "usage: suppify <app.rb> [-o name] [-d out_dir] [-t c|cruby|picoruby]" unless input
+      raise Error, "unknown target #{target.inspect} (expected #{TARGETS.join('/')})" unless TARGETS.include?(target)
       lib_name ||= File.basename(input, ".rb")
-      { input: input, lib_name: lib_name, out_dir: out_dir }
+      { input: input, lib_name: lib_name, out_dir: out_dir, target: target }
     end
 
     def run(argv, tmp_dir: ".suppify-tmp")
@@ -44,13 +51,45 @@ module Suppify
         lib_name: opts[:lib_name],
       ).run
 
+      case opts[:target]
+      when "c"        then emit_c(opts, result, emitted)
+      when "cruby"    then emit_gem(:cruby, opts, result)
+      when "picoruby" then emit_gem(:picoruby, opts, result)
+      end
+      0
+    end
+
+    # The base target: a self-contained .a + neutral header, compiled here with
+    # the host cc/ar (no cross-compilation).
+    def emit_c(opts, result, emitted)
       File.write(emitted[:c_path], result[:c_source])
       File.write(File.join(opts[:out_dir], "#{opts[:lib_name]}.h"), result[:header])
       built = Builder.new.build(c_path: emitted[:c_path],
                                 lib_name: opts[:lib_name], out_dir: opts[:out_dir])
       $stdout.puts "wrote #{built[:archive]} and #{opts[:lib_name]}.h " \
                    "(#{result[:exports].length} exports)"
-      0
+    end
+
+    # The cruby / picoruby targets: emit a buildable gem whose own source set
+    # (generated C + spinel runtime sources + language binding) is compiled by
+    # the consumer's toolchain — this is what makes cross-compilation work
+    # without suppify carrying per-target toolchains.
+    def emit_gem(kind, opts, result)
+      spinel_lib = ENV["SPINEL_LIB"].to_s
+      raise Error, "set SPINEL_LIB to spinel's lib dir for --target #{kind}" if spinel_lib.empty?
+
+      if kind == :cruby
+        gem_dir = File.join(opts[:out_dir], opts[:lib_name])
+        Emitter::CRubyGem.emit(lib_name: opts[:lib_name], c_source: result[:c_source],
+                               header: result[:header], exports: result[:exports],
+                               spinel_lib: spinel_lib, out_dir: gem_dir)
+      else
+        gem_dir = File.join(opts[:out_dir], "picoruby-#{opts[:lib_name]}")
+        Emitter::PicoRubyGem.emit(lib_name: opts[:lib_name], c_source: result[:c_source],
+                                  header: result[:header], exports: result[:exports],
+                                  spinel_lib: spinel_lib, out_dir: gem_dir)
+      end
+      $stdout.puts "wrote #{kind} gem at #{gem_dir} (#{result[:exports].length} exports)"
     end
 
     # spinel DCEs any top-level method with no call site, regardless of

@@ -35,4 +35,22 @@ class TestNeutralType < Test::Unit::TestCase
     assert_raise(Suppify::NonNeutralType) { map("sp_RbVal") }
     assert_raise(Suppify::NonNeutralType) { map("sp_Proc *") }
   end
+
+  # kind classifies a (spinel or neutral) C type into a language-agnostic
+  # marshalling category the per-target bindings switch on.
+  def test_kind_classifies_scalars
+    assert_equal :int,    Suppify::NeutralType.kind("mrb_int")
+    assert_equal :int,    Suppify::NeutralType.kind("intptr_t")
+    assert_equal :float,  Suppify::NeutralType.kind("mrb_float")
+    assert_equal :float,  Suppify::NeutralType.kind("double")
+    assert_equal :string, Suppify::NeutralType.kind("const char *")
+    assert_equal :string, Suppify::NeutralType.kind("char *")
+    assert_equal :bool,   Suppify::NeutralType.kind("mrb_bool")
+    assert_equal :bool,   Suppify::NeutralType.kind("bool")
+    assert_equal :void,   Suppify::NeutralType.kind("void")
+  end
+
+  def test_kind_raises_on_non_neutral
+    assert_raise(Suppify::NonNeutralType) { Suppify::NeutralType.kind("sp_RbVal") }
+  end
 end

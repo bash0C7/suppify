@@ -4,4 +4,5 @@ class Object
   def half: (Float) -> Float
   def greet: (String) -> String
   def even: (Integer) -> bool
+  def truthy: (bool) -> bool
 end

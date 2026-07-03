@@ -11,12 +11,33 @@ module Suppify
     def render(exports)
       out = +"\n/* === suppify appended trampolines === */\n"
       out << "static int g_suppi_err = 0;\n"
-      out << "static const char *g_suppi_msg = 0;\n\n"
+      out << "static const char *g_suppi_msg = 0;\n"
+      out << "static char g_suppi_msgbuf[256];\n"
+      out << capture
       exports.each { |e| out << one(e) << "\n" }
       out << "int suppi_error(void) { return g_suppi_err; }\n"
       out << "const char *suppi_error_message(void) { return g_suppi_msg; }\n\n"
       out << lib_init
       out
+    end
+
+    # Runs in each trampoline's setjmp handler (still at the armed stack level,
+    # before disarm) to snapshot spinel's exception message — held at
+    # sp_exc_msg[sp_exc_top - 1] — into a static buffer, then disarm + flag.
+    # sp_exc_msg / sp_exc_top are file-static in this same TU.
+    def capture
+      <<~C
+
+        static void suppi__capture(void) {
+            const char *m = (sp_exc_top > 0 && sp_exc_msg[sp_exc_top - 1])
+                          ? sp_exc_msg[sp_exc_top - 1] : "uncaught exception";
+            strncpy(g_suppi_msgbuf, m, sizeof g_suppi_msgbuf - 1);
+            g_suppi_msgbuf[sizeof g_suppi_msgbuf - 1] = 0;
+            g_suppi_msg = g_suppi_msgbuf;
+            sp_exc_disarm();
+            g_suppi_err = 1;
+        }
+      C
     end
 
     def one(e)
@@ -26,14 +47,15 @@ module Suppify
       plist = ps.empty? ? "void" : ps.join(", ")
       args  = sig.params.map { |_, n| n }.join(", ")
       body = +"#{ret} #{e['public']}(#{plist}) {\n"
+      body << "    g_suppi_err = 0;\n"
       body << "    jmp_buf jb;\n"
       if ret == "void"
-        body << "    if (setjmp(jb)) { sp_exc_disarm(); g_suppi_err = 1; return; }\n"
+        body << "    if (setjmp(jb)) { suppi__capture(); return; }\n"
         body << "    sp_exc_arm(jb);\n"
         body << "    #{e['cname']}(#{args});\n"
         body << "    sp_exc_disarm();\n"
       else
-        body << "    if (setjmp(jb)) { sp_exc_disarm(); g_suppi_err = 1; return 0; }\n"
+        body << "    if (setjmp(jb)) { suppi__capture(); return 0; }\n"
         body << "    sp_exc_arm(jb);\n"
         body << "    #{ret} r = #{e['cname']}(#{args});\n"
         body << "    sp_exc_disarm();\n"

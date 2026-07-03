@@ -17,4 +17,17 @@ class TestCLI < Test::Unit::TestCase
   def test_missing_input_raises
     assert_raise(Suppify::Error) { Suppify::CLI.parse(["-o", "x"]) }
   end
+
+  def test_target_defaults_to_c
+    assert_equal "c", Suppify::CLI.parse(["app.rb"])[:target]
+  end
+
+  def test_parses_target
+    assert_equal "cruby",    Suppify::CLI.parse(["app.rb", "-t", "cruby"])[:target]
+    assert_equal "picoruby", Suppify::CLI.parse(["app.rb", "--target", "picoruby"])[:target]
+  end
+
+  def test_unknown_target_raises
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "-t", "rust"]) }
+  end
 end
