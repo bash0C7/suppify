@@ -42,6 +42,17 @@ dependency:
 ruby suppify.rb app.rb -o libname [-d out_dir]
 ```
 
+| Argument | Meaning | Default |
+|---|---|---|
+| positional (first non-flag arg) | input `.rb` path | required — raises `Suppify::Error` if missing |
+| `-o <name>` | output library name (`lib<name>.a` / `<name>.h`) | input filename without `.rb` (e.g. `app.rb` → `app`) |
+| `-d <dir>` / `--out-dir <dir>` | output directory | `.` (current directory) |
+
+The `.rbs` sidecar isn't a flag — it's looked up automatically next to the
+input file, same basename (e.g. `foo/app.rb` → `foo/app.rbs`). There's no
+`--spinel-bin` / `--spinel-lib` flag yet; spinel is only discovered via
+`PATH` and the `SPINEL` / `SPINEL_LIB` env vars described above.
+
 Produces in `out_dir` (default `.`):
 
 - `liblibname.a` — your compiled program
@@ -100,39 +111,71 @@ exactly one suppify library per consuming binary.
 
 ## Example
 
-```ruby
-# app.rb
-def add(a, b) = a + b
-def boom = raise "x"
-```
+The steps below run strictly in this order — **no C code needs to exist
+before `suppify` runs.** `addlib.h` and `libaddlib.a` don't exist until
+step 3, so a consumer like `harness.c` can only be written afterward: it
+`#include`s a header that step 3 generates.
 
-```
-# app.rbs
-class Object
-  def add: (Integer, Integer) -> Integer
-  def boom: () -> void
-end
-```
+1. Write the Ruby source and its `.rbs` sidecar:
 
-```sh
-ruby suppify.rb app.rb -o addlib
-```
+   ```ruby
+   # app.rb
+   def add(a, b) = a + b
+   def boom = raise "x"
+   ```
 
-```c
-/* harness.c */
-#include "addlib.h"
-#include <stdio.h>
-int main(void) {
-    sp_lib_init();
-    printf("%ld\n", (long)add(2, 3));  /* 5 */
-    boom();
-    printf("%d\n", suppi_error());     /* 1 */
-}
-```
+   ```
+   # app.rbs
+   class Object
+     def add: (Integer, Integer) -> Integer
+     def boom: () -> void
+   end
+   ```
 
-```sh
-cc harness.c -I. -L. -laddlib -lspinel_rt -lm -o harness
-```
+2. Run suppify. Nothing C-related exists yet at this point — this step
+   only reads Ruby and shells out to spinel:
+
+   ```sh
+   ruby suppify.rb app.rb -o addlib
+   ```
+
+   This leaves `addlib.h`, `libaddlib.a`, and `libspinel_rt.a` in the
+   current directory (see "Usage" above for `-o`/`-d`).
+
+3. Only now, with `addlib.h` on disk, does it make sense to write a C
+   consumer:
+
+   ```c
+   /* harness.c */
+   #include "addlib.h"
+   #include <stdio.h>
+   int main(void) {
+       sp_lib_init();
+       printf("%ld\n", (long)add(2, 3));  /* 5 */
+       boom();
+       printf("%d\n", suppi_error());     /* 1 */
+   }
+   ```
+
+4. Compile and link `harness.c` against the two `.a` files from step 2.
+   This is ordinary static-library linking — nothing suppify-specific:
+
+   ```sh
+   cc harness.c -I. -L. -laddlib -lspinel_rt -lm -o harness
+   ```
+
+   - `-I.` — look for headers (`addlib.h`) in the current directory
+   - `-L.` — look for libraries (`.a` files) in the current directory
+   - `-laddlib` — link `libaddlib.a` (the `lib`/`.a` are implied by `-l`)
+   - `-lspinel_rt` — link `libspinel_rt.a`, which `libaddlib.a` depends on
+   - `-lm` — the math library, linked by convention
+   - the order (`-laddlib` before `-lspinel_rt`) follows the usual Unix
+     linker convention of listing a dependent library before the library
+     it depends on
+
+   This is the same procedure you'd use to link against any third-party
+   static library (e.g. `zlib`, `libcurl`) you built yourself — suppify's
+   output doesn't require any special linker flags or build steps.
 
 The same library is also verified callable from a real Ruby native
 extension built with `mkmf` (`test/test_ruby_ext_integration.rb`) —
