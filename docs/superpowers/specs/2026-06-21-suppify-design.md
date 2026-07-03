@@ -221,14 +221,24 @@ suppify は spinel に対して **git レベルの依存を持たない**（subm
 - **配布方針**: prebuilt バイナリは配らない（out of scope）。**usage = 利用者が `spinel suppify.rb -o suppify` でビルドし、その native バイナリを使う**。CRuby ランタイムでの実行 fallback は提供しない（CRuby は §9 のテストのみ）。
 - **テスト依存**: test-unit を bundler で repo ローカル（`vendor/bundle`）管理。テストコード自体は CRuby 上で動けばよく subset 制約を受けないが、被テストの suppify 本体ソースは subset 準拠を保つ（§9(2) の spinel ビルド E2E がこれを CI で強制する）。
 
-## 13. 後続フェーズ（v1 の中立成果物を消費する）
+## 13. ターゲットエミッタ（中立コア上のパッケージング層）
 
-1. インスタンス/クラスメソッド・非スカラー境界のエクスポート。
-2. マルチ arch ビルド（macOS arm64 / iOS device arm64 / iOS sim / ESP32 xtensa・riscv32）→ Apple 向け xcframework。
-3. 各ターゲット glue:
-   - Swift: bridging header / module map でリンク。
-   - PicoRuby/R2P2: 中立 C API を Ruby メソッドに包む C mrbgem。
-   - ESP32: CMake `target_link_libraries()` または mrbgem `spec.objs`。
+中立 C ライブラリを土台に、consumer エコシステム向けの成果物を出す層。`--target` で選ぶ。全ターゲットは spinel→中立 C のコア（同じ `.rbs`・対応型・エラー規約）を共有し、違うのは生成するバインディングとパッケージング形式のみ。設計の要は **suppify がクロスコンパイルしない**こと: gem ターゲットは「生成 C ＋ spinel ランタイムの**ソース** ＋ 言語バインディング」を同梱し、consumer 自身のビルドがそのツールチェーン・フラグでコンパイルする。ゆえに ABI が常に一致し、ESP32/iOS などへのクロスは consumer のビルドが対応する範囲で自動的に効く。
+
+実装済み・実機実証済みのターゲット:
+
+1. **`c`（既定）**: `lib<name>.a` ＋ コピーした `libspinel_rt.a` ＋ 中立ヘッダを、ここでホスト `cc`/`ar` でコンパイル。ホスト arch 専用。
+2. **`cruby`**: CRuby ネイティブ拡張 gem（`extconf.rb` + `.gemspec`）。`gem build` / `require` で、AOT 化されたメソッドが通常の Ruby メソッドとして呼べる。`test_cruby_target_integration` で mkmf ビルド→呼び出しを実証。
+3. **`picoruby`**: PicoRuby/mruby mrbgem（`mrbgem.rake` + `src/`）。`conf.gem gemdir:` で組み込む。`test_picoruby_target_integration` で実 picoruby ホストビルド→`picoruby` バイナリからの呼び出しを実証。
+
+各ターゲットで、export したトップレベルメソッドは書いたとおりの呼び出し（`add(2, 3)`）で C / CRuby / PicoRuby から呼べる。
+
+後続（未実装）:
+
+- インスタンス/クラスメソッド・非スカラー境界のエクスポート（opaque handle 設計が必要）。
+- Swift ターゲット: 中立ヘッダを module map で直接 import（Swift は C を直接呼べるため薄い）。他言語（Python 等）も同じ継ぎ目に追加可能。
+- ESP32/iOS 実機（on-device）での実行検証。現状の実証はホストビルドまで。
+- 複数 suppify ライブラリ同居のためのシンボル名前空間化（§10）。
 
 ---
 

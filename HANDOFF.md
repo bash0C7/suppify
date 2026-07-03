@@ -1,75 +1,55 @@
-# HANDOFF — suppify Plan 1
+# HANDOFF — suppify
 
-状態: **Plan 1 の実装タスクは完了、かつ user が指定した「使い物になる」基準3点も満たした**。
-branch `feat/suppify-core` に 21 commit、working tree clean、**53 テスト中 53 green + 0 omission**（実機 spinel を PATH に通した状態で `bundle exec rake test` を実行して確認。spinel が PATH に無い環境ではゲート付き integration test 2本のみ自動 omit され、それでも green）。
-次にやること: `feat/suppify-core` を main へマージする方針を user と確認する（push/PR は承認必須）。
+状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装、両方とも実機 E2E で実証済み**。
+worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**89 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 89 green（omission 0）。前提が無い環境では gated 統合テスト 5 本が自動 omit され、それでも green。
+次にやること: `feat/cross-compile` を main へ統合する方針を user と確認（push/PR は承認必須）。
 
-**重要な注記（誤解の経緯）**: このセッションの前半で「Plan 1 完了＝main へマージ可能＝リリース水準に達した」と報告したが、これは誤り。README も無く、実証は Integer 型1メソッドのみ、CI も無い状態だった。user から指摘を受け、「使い物になる」の一般的な定義（README・複数型での実証・実際の consumer からの呼び出し実証）を明示してもらい、それを満たす作業を追加で行った。CI とバージョンマトリクスは user が明示的に「不要」と判断し、Swift/PicoRuby/ESP32 個別ターゲットの検証も「今の責務外」と明示された（Ruby ネイティブエクステンションからの呼び出しで C ABI としての一般性は示せるため）。**main マージ自体は「プロダクションで広く使える」ことの証明ではなく、Plan 1 スコープの開発をブランチから本線へ統合するという内部的な区切りに過ぎない**——この区別を再度明確にしておく。
+**注記**: main には Plan 1（コア: spinel→中立 C `.a`+ヘッダ、CRuby ネイティブ拡張から呼べることまで実証）がマージ済み。本 branch はその上に「ターゲットエミッタ層」を足したもの。
 
 ## このリポジトリは何か
 
-`suppify` = spinel でコンパイルした Ruby ファイルを、どこからでも呼べる**中立 C ライブラリ**（`.a` + ヘッダ）へ変換する外部ツール。spinel 本体は一切改変しない（stock フラグのみ）。正本ドキュメント:
+`suppify` = spinel でコンパイルした Ruby を、どこからでも呼べる中立 C ライブラリへ変換する外部ツール。spinel 本体は無改変。正本ドキュメント:
 
-- 設計: `docs/superpowers/specs/2026-06-21-suppify-design.md`（実機検証で見つかった非互換と対処を §5.1・§6・付録に追記済み）
-- 実装計画: `docs/superpowers/plans/2026-06-21-suppify-core.md`（Plan 1、TDD 14 タスク）
-- **README.md**（このセッションで新規作成。利用者向けの唯一の入口——設計書は「なぜ」、README は「どう使うか」）
+- 設計: `docs/superpowers/specs/2026-06-21-suppify-design.md`（§13 にターゲットエミッタ層を追記済み）
+- README.md（利用者向け。`--target` と各ターゲットの使い方）
 
-## できていること（当セッションの tool 実行で検証済み）
+## この branch で足したもの（当セッションの tool 実行で検証済み）
 
-`lib/suppify/` に 14 モジュール、`test/` に各ユニットテスト + gated integration test 2本。`bundle exec rake test` → **53 tests / 107 assertions / 0 failures / 0 omissions**（実機 spinel あり）。
+**発想**: suppify 自身がクロスコンパイルするのをやめ、「どのツールチェーンでもビルドできるソース一式＋ビルド指示書」を吐く。コンパイルは consumer のビルドが自分の正しいフラグ（`-mlongcalls`・`MRB_NO_BOXING` 等）で行う。ゆえに ABI 一致が構造的に保証され、新ターゲットは「そのビルドが対応する arch」に自動追従する。
 
-| モジュール | 役割 |
-|---|---|
-| `json_parser.rb` | 自作の subset-safe JSON パーサ（`JSON.parse` 非依存） |
-| `symbol_map.rb` | `--emit-symbol-map` JSON を ruby名↔cname にマップ |
-| `visibility.rb` | prism で Ruby ソースを静的解析し public トップレベルメソッド集合を算出 |
-| `signature.rb` | 生成 C から cname の戻り型・引数を抽出 |
-| `neutral_type.rb` | spinel C 型 → 中立 C 型（`mrb_int`→`intptr_t`、`mrb_float`→`double`、`mrb_bool`→`int` 等）、非中立は raise |
-| `trampoline.rb` | extern トランポリン + setjmp 例外バリア + error API + `sp_lib_init` を生成 |
-| `main_renamer.rb` | `int main(` → `static int sp__main(` |
-| `header.rb` | 中立ヘッダ（spinel 型を漏らさない） |
-| `pipeline.rb` | 上記をまとめた純メモリ変換（外部プロセス無し） |
-| `spinel_runner.rb` | spinel 呼び出し（`-c` と `--emit-symbol-map` を別invocationで発行。injectable） |
-| `rbs_seed.rb` | `.rbs` サイドカー（`class Object; def name: (T1,T2) -> R; end`）をパースし literal 引数へ変換 |
-| `root_injector.rb` | public メソッドごとに `if false` で括ったダミー呼び出しを注入（spinel の DCE 対策、§5.1） |
-| `builder.rb` | `cc -c` + `ar` + `libspinel_rt.a` 同梱（injectable） |
-| `cli.rb` + 直下 `suppify.rb` | `suppify app.rb -o name` の口と dev エントリ。public メソッドがあれば `.rbs` サイドカー必須 |
+3層構造:
+- **コア（既存）**: Ruby + `.rbs` → 中立 C（`.c` + ヘッダ + トランポリン）。
+- **バインディング（新）**: `lib/suppify/binding/{cruby,mruby}.rb`。中立 C 関数をホスト言語のメソッドに包む（`rb_*` / `mrb_*` マーシャリング）。型分類は `NeutralType.kind`（:int/:float/:string/:bool/:void）。
+- **エミッタ（新）**: `lib/suppify/emitter/{cruby_gem,picoruby_gem}.rb`。ビルド可能な gem 一式を組み立てる。ランタイムソースは `lib/suppify/runtime_sources.rb` が spinel の 25 本の `.c` ＋ヘッダを src にフラット同梱（quoted include が同一 dir で解決）。
 
-## 実機 spinel で見つけて解決した非互換（前セッションからの持ち越し + 今回追加）
+CLI: `-t/--target c|cruby|picoruby`（既定 `c` = 従来の `.a`+ヘッダ）。`cruby`/`picoruby` は `SPINEL_LIB` 必須（ランタイムソース同梱のため）。
 
-spinel は `https://github.com/matz/spinel`（`master`、検証時点で commit `9394f6e`）。`tmp/spinel/`（gitignore 済み、非 commit）に ephemeral clone してビルド済み——再ビルド不要、`export PATH="$(pwd)/tmp/spinel/bin:$PATH"; export SPINEL_LIB="$(pwd)/tmp/spinel/lib"` するだけで使える。
+トランポリン改良（バインディングが要求した本物の修正）:
+- 各呼び出しの入口で `g_suppi_err` を 0 リセット → `suppi_error()` は「直近の呼び出し」を反映。無いと「一度 raise すると以降ずっと raise」になる。
+- 例外メッセージ捕捉: longjmp 着地時に `sp_exc_msg[sp_exc_top-1]`（同一 TU の static）を static バッファへコピー → `suppi_error_message()` が NULL でなく実メッセージ（`raise "x"` → `"x"`）を返す。
 
-1. **`-c` と `--emit-symbol-map` は排他モード**（`SpinelRunner` を 2 回の個別 invocation に変更。commit `02f5132`）。
-2. **spinel の whole-program DCE がトップレベルメソッドの可視性を無視する** — `.rbs` サイドカー + `RootInjector` の `if false` ダミー呼び出しで対処（commit `f69b4c7`）。詳細は設計書 §5.1。
-3. **（今回発見・修正）`NeutralType` のテーブル漏れ**: 実機 spinel は Float を `mrb_float`、bool を `mrb_bool` として出力するが、旧テーブルには無く、Float/bool を返す public メソッドは `NonNeutralType` で必ず落ちていた（＝ Integer 以外事実上使えなかった）。`mrb_float→double` / `mrb_bool→int` を追加し、`add`(Integer)/`half`(Float)/`greet`(String)/`even`(bool)/`boom`(例外) を1フィクスチャで実機通過させて実証（commit `d71b165`）。
+## 実機で実証したこと（重要）
 
-## 今回追加した「使い物になる」ための3点（user 指定の基準）
+`tmp/spinel`（main チェックアウトの実ビルドへの symlink、gitignore 済み）を使用。
 
-1. **README.md**（新規）: セットアップ・CLI 使用法・`.rbs` サイドカー要件と対応型一覧・エラー規約・1バイナリ1ライブラリ制約・具体例・テスト実行法を記載。
-2. **型カバレッジの実証**: 上記「実機 spinel で見つけて解決した非互換」3番。Integer だけでなく Float/String/bool を実機で通した。Array/Hash/独自クラスは明示的に未対応（`Suppify::Error` で raise、黙って外さない）。
-3. **Ruby ネイティブエクステンションからの呼び出し実証**（`test/test_ruby_ext_integration.rb`、commit `009aa2b`）: `mkmf` で実際に `.so`/`.bundle` をビルドし、`require` して `ExtSuppify.add` 等を Ruby から呼び出せることを確認。suppify 生成物が中立ヘッダのみ（spinel ヘッダ不要）で C ABI として消費可能なことの、C ハーネスとは独立した二つ目の証拠。Swift/PicoRuby/ESP32 個別の検証は今回のスコープ外（user 判断）。
+- **CRuby ターゲット**（`test_cruby_target_integration`, gated on spinel）: `suppify -t cruby` → `mkmf` で拡張ビルド → `require` → `add/half/greet/even/truthy` 往復、`boom` が `RuntimeError: "x"` を送出、**boom の後の `add(10,20)=30`**（per-call リセット実証）。`gem build` でパッケージ化も確認。
+- **PicoRuby ターゲット**（`test_picoruby_target_integration`, gated on spinel + `PICORUBY_ROOT`）: `suppify -t picoruby` → `conf.gem gemdir:` → 実 picoruby ホストビルド（master `de55b0a9`）が生成 C ＋ spinel ランタイムソースを `libmruby.a` にコンパイル → ビルドした `picoruby` バイナリがスクリプトから同メソッド群を実行。同じ出力を確認。
+  - picoruby は生成 gem_init.c で `mrb_<gem>_gem_final` も参照するため、バインディングが空の gem_final も出す（実 picoruby ビルドで検出・修正済み）。
 
-CI・バージョンマトリクスは user 判断により**実装しない**（既存の手動 ephemeral clone 手順で十分、との判断）。
+## まだ手を付けていないこと
 
-## まだ手を付けていないこと（範囲外と明示された／将来課題）
-
-- Swift/PicoRuby/ESP32 での実ターゲット検証（user が「今の責務外」と明示）。
-- CI（user が「不要」と明示）。
-- Plan 2（未着手）: suppify 自身を spinel で 1 バイナリ化する自己ホスティング。最大の未検証点は「spinel-compiled バイナリが libprism を FFI で叩けるか」。Plan 2 冒頭の spike で判定する。Plan 1 はこれに依存しない。
-- `RbsSeed`/`NeutralType` の対応型は Integer/Float/String/Symbol/bool/nil のみ（Array/Hash/オブジェクト型は未実装、使うと明確に raise）。
+- **on-device / on-iPhone の実行検証**: 現状の実証はホストビルドまで（M3 mac 上の CRuby 拡張と picoruby ホストバイナリ）。ESP32 実機・iOS 実機での実行は未。ただし picoruby のクロスビルド機構（xtensa/iOS build_config）に gem を渡す口は同じなので、機構としては通るはず。R2P2-ESP32 / R2P2-iOS への実配線は次の実弾。
+- **非スカラー境界**（Array/Hash/インスタンスを持つクラス）。現状 export できるのはスカラー（Integer/Float/String/Symbol/bool/void）を扱うトップレベルメソッドのみ。stackchan の `FrameParser`（stateful）等は opaque handle 設計が要る後続。
+- **Swift/他言語エミッタ**: 継ぎ目（`binding/` + `emitter/`）は用意済み。Swift は中立ヘッダを module map で直接 import できるため薄い。未実装。
+- 複数 suppify ライブラリ同居のシンボル衝突（`sp_lib_init` 等の共通名）。1 バイナリ 1 ライブラリ制約は据え置き。
 
 ## 再開手順
 
-1. `feat/suppify-core` を main へマージする方針を user と確認する（push/PR は user 承認必須）。念のため：これは「Plan 1 スコープの開発を本線に統合する」ことであり、「プロダクションで広く使える」という別の主張ではない。
-2. マージ後、Plan 2 に着手するなら `docs/superpowers/plans/2026-06-21-suppify-core.md` の「後続フェーズ」節と spike 計画を確認する。
-3. Array/Hash/オブジェクト型の export が必要になったら `RbsSeed::LITERALS` / `NeutralType::TABLE` の拡張から着手する。
-
-## 実装中に見つけた計画のバグ（修正済み）
-
-- `044d208 fix(trampoline)`: Plan の Task 7 テストが `return sp_call(args);`（成功パスで `sp_exc_disarm()` を飛ばす形）を要求していた。setjmp バリアを armed のまま return し、ローカル `jmp_buf` が dead frame になる **correctness バグ**。テスト側を正し、impl を spec の正しい順序（arm → call → disarm → return r）へ戻した。Plan doc の Task 7 はこの修正を反映していない。
-- `02f5132` / `f69b4c7` / `d71b165`: 上記「実機 spinel で見つけて解決した非互換」参照。
+1. `export PATH="$(pwd)/tmp/spinel/bin:$PATH"; export SPINEL_LIB="$(pwd)/tmp/spinel/lib"`（`tmp/spinel` は symlink 済み。無ければ main チェックアウトで `tmp/spinel` を再ビルド）。
+2. `bundle exec rake test` — spinel 有りで unit + gated（picoruby は `PICORUBY_ROOT` があれば実行、約 30s のホストビルドを含む）。
+3. main への統合方針を user 確認。
 
 ## 制約（厳守）
 
-- commit message は英語。Ruby のみ（No Python）。spinel への依存は外部ツール参照のみ（submodule/vendor 禁止、`tmp/spinel/` は gitignore 済みの ephemeral clone）。
+- commit message は英語。Ruby のみ（No Python）。spinel 依存は外部ツール参照のみ（`tmp/spinel` は ephemeral、非 commit）。picoruby/picoruby には絶対 commit しない（ビルドは `MRUBY_BUILD_DIR` を temp に逃がす）。
 - push / PR / amend は user 承認必須。ローカル commit は autonomy あり。
