@@ -7,4 +7,5 @@ class Object
   def truthy: (bool) -> bool
   def cat: (String, String) -> String
   def nully: () -> String
+  def frozen_nully: () -> String
 end

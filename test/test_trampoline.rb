@@ -112,7 +112,21 @@ class TestTrampoline < Test::Unit::TestCase
   # recovers spinel's own tracked byte length (from the string header, not
   # strlen); this bridges it through the neutral boundary so a binding can
   # build a correctly-sized Ruby string instead of guessing via strlen.
-  def test_exposes_str_len_bridge_to_spinels_tracked_byte_length
-    assert_match(/size_t addlib_str_len\(const char \*s\) \{ return sp_str_byte_len\(s\); \}/, @c)
+  #
+  # sp_str_byte_len itself only recognizes the 0xfe/0xfc/0xfd marker bytes,
+  # not 0xf1 (a heap string frozen via .freeze -- see spinel's own
+  # sp_str_freeze_val), silently falling back to strlen for a frozen
+  # string and reintroducing the exact truncation this bridge exists to
+  # avoid (confirmed by an adversarial review: `# frozen_string_literal:
+  # true` reproduces it). sp_str_freeze_val only flips the marker byte in
+  # place on an already sp_str_alloc'd buffer, so the header behind a
+  # 0xf1-marked string is still valid; read it directly for this one
+  # marker spinel's own helper misses.
+  def test_str_len_bridge_handles_frozen_strings_too
+    assert_match(/size_t addlib_str_len\(const char \*s\) \{/, @c)
+    assert_match(/if \(!s\) return 0;/, @c)
+    assert_match(/if \(\(\(const unsigned char \*\)s\)\[-1\] == 0xf1\) \{/, @c)
+    assert_match(/return \(\(\(const sp_str_hdr \*\)\(s - 1\)\) - 1\)->len;/, @c)
+    assert_match(/return sp_str_byte_len\(s\);/, @c)
   end
 end

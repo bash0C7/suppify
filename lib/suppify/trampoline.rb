@@ -24,11 +24,7 @@ module Suppify
       exports.each { |e| out << one(e) << "\n" }
       out << "int #{lib_name}_error(void) { return g_suppi_err; }\n"
       out << "const char *#{lib_name}_error_message(void) { return g_suppi_msg; }\n"
-      # rb_str_new_cstr/mrb_str_new_cstr are strlen-based, silently truncating
-      # a String return at its first embedded NUL. sp_str_byte_len recovers
-      # spinel's own tracked byte length (from the string header, not
-      # strlen), bridged here so a binding can size the Ruby string correctly.
-      out << "size_t #{lib_name}_str_len(const char *s) { return sp_str_byte_len(s); }\n\n"
+      out << str_len(lib_name)
       out << lib_init(lib_name)
       out
     end
@@ -100,6 +96,31 @@ module Suppify
       dup = "sp_dup_#{n}"
       body << "    const char *#{dup} = sp_str_dup_external(#{n}); SP_GC_ROOT(#{dup});\n"
       dup
+    end
+
+    # rb_str_new_cstr/mrb_str_new_cstr are strlen-based, silently truncating
+    # a String return at its first embedded NUL. sp_str_byte_len recovers
+    # spinel's own tracked byte length from the string header instead of
+    # strlen -- except it only recognizes the 0xfe/0xfc/0xfd marker bytes,
+    # not 0xf1 (a heap string frozen via .freeze, including every literal
+    # in a `# frozen_string_literal: true` file -- see spinel's own
+    # sp_str_freeze_val), silently falling back to strlen for a frozen
+    # string and reintroducing the exact truncation this bridge exists to
+    # avoid. sp_str_freeze_val only flips the marker byte in place on an
+    # already sp_str_alloc'd buffer, so the header behind a 0xf1-marked
+    # string is still valid; read it directly for this one marker spinel's
+    # own helper misses.
+    def str_len(lib_name)
+      <<~C
+
+        size_t #{lib_name}_str_len(const char *s) {
+            if (!s) return 0;
+            if (((const unsigned char *)s)[-1] == 0xf1) {
+                return (((const sp_str_hdr *)(s - 1)) - 1)->len;
+            }
+            return sp_str_byte_len(s);
+        }
+      C
     end
 
     def lib_init(lib_name)

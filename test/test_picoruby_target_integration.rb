@@ -59,11 +59,15 @@ class TestPicoRubyTargetIntegration < Test::Unit::TestCase
         # embedded NUL; the fix uses lib_name_str_len for the real byte
         # length. bytesize must be 3, not 1.
         print nully.bytesize, " "
+        # spinel's own sp_str_byte_len doesn't recognize a frozen string's
+        # marker byte and falls back to strlen -- the fix reads the string
+        # header directly for this one marker. bytesize must be 3, not 1.
+        print frozen_nully.bytesize, " "
         begin; boom; rescue => e; print "raised:", e.message, " "; end
         print add(10, 20)
       RUBY
       out = IO.popen([picoruby, prog], &:read)
-      assert_equal "5 2.5 hi, world true false true false foobar 3 raised:x 30", out.strip
+      assert_equal "5 2.5 hi, world true false true false foobar 3 3 raised:x 30", out.strip
     end
   end
 

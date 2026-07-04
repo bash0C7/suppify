@@ -101,4 +101,24 @@ class TestCLIEmitGem < Test::Unit::TestCase
       assert_match(/s\.license\s*=\s*"MIT"/, gemspec)
     end
   end
+
+  # opts[:license] || "MIT" treats an explicit empty string as present (only
+  # nil/false are falsy in Ruby), silently writing spec.license = "" instead
+  # of falling back -- picoruby's own hard-fail check (!licenses) also
+  # doesn't catch an empty-but-present string, so this produces a silently
+  # wrong mrbgem.rake rather than a build error. An empty --license is
+  # exactly as "unset" as an absent one for this purpose.
+  def test_emit_gem_treats_empty_license_as_unset_for_picoruby
+    omit("SPINEL_LIB unset") if ENV["SPINEL_LIB"].to_s.empty?
+
+    Dir.mktmpdir do |root|
+      opts = { out_dir: root, lib_name: "addlib", gem_version: "0.1.0", license: "" }
+      result = { c_source: "", header: "", exports: [] }
+
+      Suppify::CLI.emit_gem(:picoruby, opts, result)
+
+      rake = File.read(File.join(root, "picoruby-addlib", "mrbgem.rake"))
+      assert_match(/spec\.license\s*=\s*"MIT"/, rake)
+    end
+  end
 end

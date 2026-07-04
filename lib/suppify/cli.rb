@@ -127,12 +127,15 @@ module Suppify
       else
         gem_dir = File.join(opts[:out_dir], "picoruby-#{opts[:lib_name]}")
         # Unlike a CRuby gemspec, picoruby's mrbgem build hard-fails without
-        # a license, so an unset --license falls back to the ecosystem's
-        # common permissive default instead of forwarding a bare nil.
+        # a license, so an unset (or explicitly empty -- "" is truthy in
+        # Ruby and wouldn't trip a bare `||`) --license falls back to the
+        # ecosystem's common permissive default instead of forwarding a
+        # value picoruby's own hard-fail check wouldn't catch either.
+        license = opts[:license].to_s.empty? ? "MIT" : opts[:license]
         Emitter::PicoRubyGem.emit(lib_name: opts[:lib_name], c_source: result[:c_source],
                                   header: result[:header], exports: result[:exports],
                                   spinel_lib: spinel_lib, out_dir: gem_dir,
-                                  version: opts[:gem_version], license: opts[:license] || "MIT")
+                                  version: opts[:gem_version], license: license)
       end
       $stdout.puts "wrote #{kind} gem at #{gem_dir} (#{result[:exports].length} exports)"
     end
