@@ -146,8 +146,9 @@ static mrb_int sp_add(mrb_int a, mrb_int b) { ... }
 
 - 境界に出してよい型はスカラーのみ（`mrb_int` / `double` / `const char *` / bool）。
 - **中立 header は spinel 型を漏らさない**: 公開プロトタイプでは `mrb_int` を標準型（`intptr_t` / `long long`）に、bool を `int` に写し、`sp_*` 型を一切含めない。これにより consumer（Swift / PicoRuby）は spinel の header を一切 include せずに済む。
-- 例外はホストを巻き込まず、`suppi_error()` / `suppi_error_message()` で問い合わせる方式に変換（v1）。完全な per-call 例外伝播は後続。
-- **`sp_lib_init()` は呼び出しスレッドで、浅いフレームから 1 度だけ**呼ぶ規約（GC のスタック基準確定のため）。
+- 例外はホストを巻き込まず、`<name>_error()` / `<name>_error_message()` で問い合わせる方式に変換（v1）。完全な per-call 例外伝播は後続。
+- **`<name>_init()` は呼び出しスレッドで、浅いフレームから 1 度だけ**呼ぶ規約（GC のスタック基準確定のため）。
+- lifecycle/error API（`<name>_init` / `<name>_error` / `<name>_error_message`）と文字列長ブリッジ（`<name>_str_len`）はライブラリごとに `-o` 名で prefix される（§10・§13）。
 
 ---
 
@@ -199,7 +200,7 @@ int main(void){
 - **生成 C 整形のバージョン差**: signature 抽出・main rename が将来の spinel で壊れ得る → §8 の CI（特に master カナリア + ゴールデン検査）で検知。
 - **GC スタック基準**: `sp_lib_init()` のフレームより深い所からトランポリンを呼ぶ前提。init を浅いフレームで 1 度だけ呼ぶ規約を文書化し、ハーネスで検証。
 - **例外バリアと runtime の結合**: `sp_exc_arm`/`disarm` のグローバル stack 前提が将来変わる可能性 → CI のスモークアサート（`boom`）で検知。
-- **複数 suppify ライブラリの同時リンク**: `sp_lib_init` / `sp__main` / `suppi_error` / `libspinel_rt.a` のシンボルが共通名のため、1 つの実行ファイルに 2 つ以上の suppify 製 `.a` をリンクすると衝突する。v1 は「1 バイナリにつき suppify ライブラリ 1 つ」を制約とする。複数同居は将来フェーズで lib 名 prefix のシンボル名前空間化（`sp_lib_init` → `<libname>_lib_init` 等）で解く。
+- **複数 suppify ライブラリの同時リンク（対処済み、§13）**: `sp_lib_init` / `sp__main` / `suppi_error` / spinel ランタイムのシンボルは元々共通名で、1 つの実行ファイルに 2 つ以上の suppify 製ライブラリをリンクすると衝突していた。`SymbolPrefix`（`nm` によるシンボル実発見 + `-include` prelude での `#define` リネーム）でライブラリごとに namespace 化し解決。CRuby（複数 gem を同一プロセスに `require`）・PicoRuby（複数 mrbgem を同一 picoruby バイナリにリンク）の両方で実機実証済み。唯一の既知の残存制限は `c` target で2つの `.a` を直接リンクするケース（`sp_ctx_swap` が生アセンブリのシンボル名でハードコードされておりリネーム不可、spinel 自身の GC フィボナ根マーキングが無条件にこれを要求するため衝突）。
 
 ---
 
@@ -227,18 +228,19 @@ suppify は spinel に対して **git レベルの依存を持たない**（subm
 
 実装済み・実機実証済みのターゲット:
 
-1. **`c`（既定）**: `lib<name>.a` ＋ コピーした `libspinel_rt.a` ＋ 中立ヘッダを、ここでホスト `cc`/`ar` でコンパイル。ホスト arch 専用。
+1. **`c`（既定）**: 自己完結の `lib<name>.a`（spinel ランタイムを再コンパイルして同梱、namespace 化済み）＋ 中立ヘッダを、ここでホスト `cc`/`ar` でコンパイル。ホスト arch 専用。
 2. **`cruby`**: CRuby ネイティブ拡張 gem（`extconf.rb` + `.gemspec`）。`gem build` / `require` で、AOT 化されたメソッドが通常の Ruby メソッドとして呼べる。`test_cruby_target_integration` で mkmf ビルド→呼び出しを実証。
 3. **`picoruby`**: PicoRuby/mruby mrbgem（`mrbgem.rake` + `src/`）。`conf.gem gemdir:` で組み込む。`test_picoruby_target_integration` で実 picoruby ホストビルド→`picoruby` バイナリからの呼び出しを実証。
 
 各ターゲットで、export したトップレベルメソッドは書いたとおりの呼び出し（`add(2, 3)`）で C / CRuby / PicoRuby から呼べる。
+
+**複数ライブラリ同居**: `SymbolPrefix`（§10）が spinel ランタイムの全シンボル（`nm` で実発見、約600個）と suppify 自身の固定名 API（`sp_lib_init` 等 → `<name>_init` 等に Ruby 側で直接改名）をライブラリごとに namespace 化。CRuby・PicoRuby の両方で複数ライブラリ同居を実機実証済み（`c` target の直接2アーカイブリンクのみ `sp_ctx_swap` の既知の制限が残る）。
 
 後続（未実装）:
 
 - インスタンス/クラスメソッド・非スカラー境界のエクスポート（opaque handle 設計が必要）。
 - Swift ターゲット: 中立ヘッダを module map で直接 import（Swift は C を直接呼べるため薄い）。他言語（Python 等）も同じ継ぎ目に追加可能。
 - ESP32/iOS 実機（on-device）での実行検証。現状の実証はホストビルドまで。
-- 複数 suppify ライブラリ同居のためのシンボル名前空間化（§10）。
 
 ---
 

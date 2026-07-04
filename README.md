@@ -49,6 +49,8 @@ ruby suppify.rb app.rb -o libname [-d out_dir] [-t c|cruby|picoruby]
 | `-o <name>` | output library name (`lib<name>.a` / `<name>.h`) | input filename without `.rb` (e.g. `app.rb` → `app`) |
 | `-d <dir>` / `--out-dir <dir>` | output directory | `.` (current directory) |
 | `-t <target>` / `--target <target>` | output target: `c`, `cruby`, or `picoruby` (see [Targets](#targets)) | `c` |
+| `--gem-version <version>` | `cruby`/`picoruby` only: the emitted gem/mrbgem's version | `0.1.0` |
+| `--license <name>` | `cruby`/`picoruby` only: the emitted gem/mrbgem's license | unset for `cruby` (omitted from the gemspec); `MIT` for `picoruby` (its build requires one) |
 
 The `.rbs` sidecar isn't a flag — it's looked up automatically next to the
 input file, same basename (e.g. `foo/app.rb` → `foo/app.rbs`). There's no
@@ -57,9 +59,9 @@ input file, same basename (e.g. `foo/app.rb` → `foo/app.rbs`). There's no
 
 With the default `c` target, produces in `out_dir` (default `.`):
 
-- `liblibname.a` — your compiled program
-- `libspinel_rt.a` — copied alongside, so the output is self-contained
-  (consumers never need spinel installed)
+- `liblibname.a` — your compiled program, self-contained: it bundles a
+  recompiled, namespaced copy of spinel's runtime (consumers never need
+  spinel installed, and never link a separate runtime archive)
 - `libname.h` — a **neutral** header (no spinel types leak through; see
   "Supported types" below)
 
@@ -73,7 +75,7 @@ result is packaged.
 
 | Target | Output | Consumed by |
 |---|---|---|
-| `c` (default) | `liblibname.a` + `libspinel_rt.a` + neutral `libname.h`, **compiled here** with the host `cc`/`ar` | any C program, linked directly (see [Example](#example)) |
+| `c` (default) | self-contained `liblibname.a` + neutral `libname.h`, **compiled here** with the host `cc`/`ar` | any C program, linked directly (see [Example](#example)) |
 | `cruby` | a buildable **CRuby native-extension gem** (`ext/.../extconf.rb` + `*.gemspec`) under `out_dir/libname` | CRuby, via `gem build` / `require` — the AOT-compiled methods become ordinary Ruby methods |
 | `picoruby` | a buildable **PicoRuby mrbgem** (`mrbgem.rake` + `src/`) under `out_dir/picoruby-libname` | PicoRuby, via `conf.gem gemdir:` in a build_config |
 
@@ -144,24 +146,43 @@ silently producing a broken export.
 ### Errors
 
 Exceptions don't cross the C boundary as Ruby exceptions. Call
-`suppi_error()` / `suppi_error_message()` after invoking an exported
-function to check whether it raised. Full per-call exception propagation is
-a later phase, not v1.
+`<name>_error()` / `<name>_error_message()` (e.g. `addlib_error()` for a
+library built with `-o addlib`) after invoking an exported function to
+check whether it raised. Full per-call exception propagation is a later
+phase, not v1.
 
-### Constraint: one suppify library per binary
+### String returns and embedded NULs
 
-`sp_lib_init`, `sp__main`, `suppi_error`, and `libspinel_rt.a`'s symbols
-are shared C names across any suppify-built library. Linking two
-suppify-built libraries into the same binary will collide. v1 supports
-exactly one suppify library per consuming binary.
+A `String` return value's C pointer is a plain `const char *`, but Ruby
+strings can contain embedded NUL bytes that `strlen` would truncate at. If
+that matters for your use case, call `<name>_str_len(ptr)` (e.g.
+`addlib_str_len(...)`) to get the real byte length instead of assuming
+NUL-termination — this is exactly what the `cruby`/`picoruby` bindings do
+internally when building a Ruby/mruby string from a returned value.
+
+### Multiple suppify libraries in one binary
+
+Each suppify library namespaces spinel's runtime symbols and its own
+lifecycle/error API (`<name>_init`, `<name>_error`, `<name>_error_message`,
+`<name>_str_len`) to its own `-o <name>`, so multiple suppify libraries can
+coexist — verified as two `cruby` gems `require`d into one Ruby process,
+and as two `picoruby` mrbgems linked into one picoruby binary. The `c`
+target has one remaining gap: directly linking two suppify-built `.a`
+files into the same binary (`cc ... -laddlib -lmullib`) still fails on a
+duplicate `sp_ctx_swap` symbol (spinel's Fiber context-switch primitive,
+whose name is hardcoded inside a raw assembly block that can't be
+renamed). It's stateless and identical across libraries, so this only
+happens if you link the raw `c`-target archives directly; the `cruby`/
+`picoruby` targets aren't affected. Pick distinct exported method names
+(`-o`/`def` names) across libraries either way, same as any C code.
 
 ### Cross-compilation
 
 Cross-compilation depends on the target:
 
 - The **`c` target compiles here**, with a hardcoded host `cc` (no `--cc=` /
-  `CC` override, no target triple/sysroot) and copies the host-built
-  `libspinel_rt.a`. It only produces output for the host architecture.
+  `CC` override, no target triple/sysroot), recompiling spinel's runtime
+  into the same archive. It only produces output for the host architecture.
 - The **`cruby` / `picoruby` targets don't compile at all** — they emit a
   source bundle (generated C + spinel runtime sources + binding) that the
   *consumer's* build compiles. So a `picoruby` gem cross-compiles wherever
@@ -202,7 +223,7 @@ step 3, so a consumer like `harness.c` can only be written afterward: it
    ruby suppify.rb app.rb -o addlib
    ```
 
-   This leaves `addlib.h`, `libaddlib.a`, and `libspinel_rt.a` in the
+   This leaves `addlib.h` and the self-contained `libaddlib.a` in the
    current directory (see "Usage" above for `-o`/`-d`).
 
 3. Only now, with `addlib.h` on disk, does it make sense to write a C
@@ -213,28 +234,27 @@ step 3, so a consumer like `harness.c` can only be written afterward: it
    #include "addlib.h"
    #include <stdio.h>
    int main(void) {
-       sp_lib_init();
+       addlib_init();
        printf("%ld\n", (long)add(2, 3));  /* 5 */
        boom();
-       printf("%d\n", suppi_error());     /* 1 */
+       printf("%d\n", addlib_error());    /* 1 */
    }
    ```
 
-4. Compile and link `harness.c` against the two `.a` files from step 2.
-   This is ordinary static-library linking — nothing suppify-specific:
+4. Compile and link `harness.c` against `libaddlib.a` from step 2. This is
+   ordinary static-library linking — nothing suppify-specific:
 
    ```sh
-   cc harness.c -I. -L. -laddlib -lspinel_rt -lm -o harness
+   cc harness.c -I. -L. -laddlib -lm -o harness
    ```
 
    - `-I.` — look for headers (`addlib.h`) in the current directory
    - `-L.` — look for libraries (`.a` files) in the current directory
-   - `-laddlib` — link `libaddlib.a` (the `lib`/`.a` are implied by `-l`)
-   - `-lspinel_rt` — link `libspinel_rt.a`, which `libaddlib.a` depends on
+   - `-laddlib` — link `libaddlib.a` (the `lib`/`.a` are implied by `-l`);
+     it's self-contained (spinel's runtime is bundled in, namespaced to
+     this library — see [Multiple suppify libraries in one
+     binary](#multiple-suppify-libraries-in-one-binary))
    - `-lm` — the math library, linked by convention
-   - the order (`-laddlib` before `-lspinel_rt`) follows the usual Unix
-     linker convention of listing a dependent library before the library
-     it depends on
 
    This is the same procedure you'd use to link against any third-party
    static library (e.g. `zlib`, `libcurl`) you built yourself — suppify's
