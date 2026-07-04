@@ -1,14 +1,21 @@
 # HANDOFF — suppify
 
-状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も fresh-context 敵対的検証にかけて3件の実バグを発見・修正済み**。
-worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**116 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 116 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。
+状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も2ラウンドの fresh-context 敵対的検証にかけて計5件の実バグを発見・修正済み**。
+worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**117 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 117 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。
 次にやること: `feat/cross-compile` を main へ統合する方針を user と確認（push/PR は承認必須）。
 
-## symbol namespacing 実装の敵対的検証で発見・修正した3件
+## symbol namespacing 実装の敵対的検証で発見・修正した5件
 
+**1ラウンド目**（gem メタデータ・CLI 周り）:
 1. **gemspec/mrbgem.rake の `--gem-version` 未エスケープ**（重大）: `license` は `.inspect` で正しくエスケープされていたが `version` は生の文字列補間だった。`"` を含む version 値でエスケープを脱出でき、`gem build`/`bundle`/picoruby の Rake ビルドが読み込んだ瞬間に任意 Ruby が実行されうる。実際に `system("touch ...")` を注入して再現確認 → `.inspect` に統一して修正。
 2. **`lib_name` が C 識別子として未検証**（重大）: `SymbolPrefix.prelude` は `#define sym lib_name_sym` を生成するが、`lib_name` にハイフン等が入ると（`-o my-lib` は自然な命名）プリプロセッサのトークン化が壊れ、リネーム済み全シンボルが不正な式になる。実際に `-o my-lib` で20件以上のコンパイルエラーを再現 → CLI で C 識別子検証を追加（不正なら明確なエラー）。あわせて spinel 自身のランタイムソースのベース名（`sp_gc` 等）との衝突も拒否するようにした。
 3. **CLI 引数パーサがフラグの値を無検証で消費**（中）: `--license -o mylib` のような取り違えで `-o` の値が silently 消える・エラーメッセージが的外れになる問題を確認 → 値が欠落しているか別のフラグに見える場合は明確なエラーを出すよう修正。
+
+**2ラウンド目**（trampoline/binding、セッション制限からの再開後）:
+4. **frozen 文字列で embedded-NUL 切り詰めバグが再発**（重大）: `<lib_name>_str_len` が委譲する spinel 自身の `sp_str_byte_len` は marker byte `0xfe`/`0xfc`/`0xfd` しか認識せず、`.freeze` や `# frozen_string_literal: true`（非常に一般的な magic comment）が付けるマーカー `0xf1` を見落として `strlen` にフォールバックする。実際に `# frozen_string_literal: true` 付きの embedded-NUL 文字列で `bytesize` が壊れることを再現 → spinel の `sp_str_freeze_val` はマーカーバイトを書き換えるだけでヘッダ自体は有効なままと確認できたので、`<lib_name>_str_len` 内でこの1マーカーだけ直接ヘッダを読むよう拡張して修正（spinel 自身は無改変）。
+5. **空文字列 `--license ""` が PicoRuby の MIT フォールバックを回避**（軽微）: `opts[:license] || "MIT"` は Ruby の truthy 判定上、空文字列を「設定済み」とみなしフォールバックしない。picoruby 側の必須チェックも空文字列は素通しするため、ビルド失敗ではなく `spec.license = ""` という無意味な値が静かに書かれてしまう → 空文字列も「未設定」として扱うよう修正。
+
+（GC-root リークの save/restore・nil 返却時の NULL 未ガードについても2ラウンド目で精査されたが、現状の設計では到達不能／すでに正しく機能していることを確認済み。）
 
 **ドーマントな既知の制限として文書化のみ（修正せず）**: `SymbolPrefix.discover_runtime_symbols` は `SP_THREADS` 無しでランタイムをコンパイルするため、spinel のスレッド版ランタイムにのみ存在するグローバル（`sp_heap_lock`/`sp_sched_sleep`/`sp_sched_wait_io`）は未リネームのまま残る。現状 suppify のどのターゲットも `SP_THREADS` を有効化しないため今は無害。
 
