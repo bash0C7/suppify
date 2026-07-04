@@ -46,6 +46,12 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
       out = emit(root)
       extconf = File.read(File.join(out, "ext", "addlib", "extconf.rb"))
       assert_match(/create_makefile\("addlib\/addlib"\)/, extconf)
+      # The bundled (unmodified) spinel runtime sources trip a couple of
+      # harmless warnings under the host Ruby's CFLAGS (e.g. spinel's
+      # sp_types.h unconditionally #defines _DARWIN_C_SOURCE, colliding with
+      # mkmf's own -D_DARWIN_C_SOURCE=1). Suppressed so a clean `make` isn't
+      # mistaken for a real problem in generated code.
+      assert_match(/\$CFLAGS << " -Wno-macro-redefined -Wno-missing-noreturn"/, extconf)
       gemspec = File.read(File.join(out, "addlib.gemspec"))
       assert_match(/s\.name\s*=\s*"addlib"/, gemspec)
       assert_match(%r{s\.extensions\s*=\s*\["ext/addlib/extconf\.rb"\]}, gemspec)

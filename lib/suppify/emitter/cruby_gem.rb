@@ -35,6 +35,12 @@ module Suppify
           require "mkmf"
           # libm for the runtime's math (sp_format); harmless where libm is in libc.
           $LDFLAGS << " -lm"
+          # The bundled (unmodified) spinel runtime sources trip a couple of
+          # harmless warnings under the host CFLAGS (e.g. spinel's own
+          # sp_types.h unconditionally #defines _DARWIN_C_SOURCE, colliding
+          # with mkmf's -D_DARWIN_C_SOURCE=1 on macOS). Suppressed so a clean
+          # build isn't mistaken for a problem in the generated code.
+          $CFLAGS << " -Wno-macro-redefined -Wno-missing-noreturn"
           # All .c in this dir (generated TU, binding, flattened spinel runtime)
           # are picked up by mkmf's default *.c globbing.
           create_makefile("#{lib_name}/#{lib_name}")

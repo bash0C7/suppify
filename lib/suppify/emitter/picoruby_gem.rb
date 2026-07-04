@@ -42,6 +42,12 @@ module Suppify
             spec.cc.include_paths << "\#{dir}/include"
             # libm for the spinel runtime's math (harmless where libm is in libc).
             spec.linker.libraries << 'm'
+            # Same harmless spinel-runtime-origin warnings as the cruby target
+            # (e.g. sp_types.h unconditionally #defines _DARWIN_C_SOURCE).
+            # -Wno-* for an unrecognized name is silently accepted by both
+            # gcc and clang, so this is safe across whatever cross toolchain
+            # the consuming build_config selects.
+            spec.cc.flags << '-Wno-macro-redefined' << '-Wno-missing-noreturn'
           end
         RUBY
       end

@@ -50,6 +50,10 @@ class TestTrampoline < Test::Unit::TestCase
   def test_includes_sp_lib_init
     assert_match(/void sp_lib_init\(void\)/, @c)
     assert_match(/sp__main\(1, av\);/, @c)
+    # C string literals are `char[N]` (not const-qualified), but a strict
+    # compiler still warns on assigning one to a `char *` slot; the explicit
+    # cast is the standard fake-argv idiom and silences that harmless warning.
+    assert_match(/char \*av\[\] = \{ \(char \*\)"lib", 0 \};/, @c)
   end
 
   # On a caught exception the trampoline captures spinel's message (held in

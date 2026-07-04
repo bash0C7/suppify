@@ -45,6 +45,11 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       rake = File.read(File.join(out, "mrbgem.rake"))
       assert_match(/MRuby::Gem::Specification\.new\('picoruby-addlib'\)/, rake)
       assert_match(/spec\.cc\.include_paths << "#\{dir\}\/include"/, rake)
+      # Same harmless-but-noisy warnings as the cruby target (spinel's own
+      # sp_types.h unconditionally #defines _DARWIN_C_SOURCE); -Wno-* for an
+      # unrecognized name is silently accepted by both gcc and clang, so this
+      # is safe across the cross toolchains a picoruby build_config selects.
+      assert_match(/spec\.cc\.flags << '-Wno-macro-redefined' << '-Wno-missing-noreturn'/, rake)
     end
   end
 

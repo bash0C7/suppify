@@ -87,7 +87,7 @@ module Suppify
       <<~C
         void sp_lib_init(void) {
             static int done = 0; if (done) return; done = 1;
-            char *av[] = { "lib", 0 };
+            char *av[] = { (char *)"lib", 0 };
             sp__main(1, av);
         }
       C
