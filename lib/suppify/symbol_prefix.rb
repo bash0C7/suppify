@@ -45,6 +45,12 @@ module Suppify
       static const char *sp_class_to_s(sp_Class c) { (void)c; return ""; }
     C
 
+    # Compiled without SP_THREADS, so the handful of globals unique to
+    # spinel's threaded runtime variant (sp_heap_lock, sp_sched_sleep,
+    # sp_sched_wait_io) go unrenamed if the real target build ever compiles
+    # suppify's bundled runtime with SP_THREADS -- nothing in suppify does
+    # today (no target passes it through), so this is a dormant gap, not an
+    # active one.
     def discover_runtime_symbols(spinel_lib)
       Dir.mktmpdir do |dir|
         RuntimeSources.copy_flat(spinel_lib, dir)

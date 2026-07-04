@@ -1,8 +1,16 @@
 # HANDOFF — suppify
 
-状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ済み**。
-worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**111 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 111 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。
+状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も fresh-context 敵対的検証にかけて3件の実バグを発見・修正済み**。
+worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**116 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 116 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。
 次にやること: `feat/cross-compile` を main へ統合する方針を user と確認（push/PR は承認必須）。
+
+## symbol namespacing 実装の敵対的検証で発見・修正した3件
+
+1. **gemspec/mrbgem.rake の `--gem-version` 未エスケープ**（重大）: `license` は `.inspect` で正しくエスケープされていたが `version` は生の文字列補間だった。`"` を含む version 値でエスケープを脱出でき、`gem build`/`bundle`/picoruby の Rake ビルドが読み込んだ瞬間に任意 Ruby が実行されうる。実際に `system("touch ...")` を注入して再現確認 → `.inspect` に統一して修正。
+2. **`lib_name` が C 識別子として未検証**（重大）: `SymbolPrefix.prelude` は `#define sym lib_name_sym` を生成するが、`lib_name` にハイフン等が入ると（`-o my-lib` は自然な命名）プリプロセッサのトークン化が壊れ、リネーム済み全シンボルが不正な式になる。実際に `-o my-lib` で20件以上のコンパイルエラーを再現 → CLI で C 識別子検証を追加（不正なら明確なエラー）。あわせて spinel 自身のランタイムソースのベース名（`sp_gc` 等）との衝突も拒否するようにした。
+3. **CLI 引数パーサがフラグの値を無検証で消費**（中）: `--license -o mylib` のような取り違えで `-o` の値が silently 消える・エラーメッセージが的外れになる問題を確認 → 値が欠落しているか別のフラグに見える場合は明確なエラーを出すよう修正。
+
+**ドーマントな既知の制限として文書化のみ（修正せず）**: `SymbolPrefix.discover_runtime_symbols` は `SP_THREADS` 無しでランタイムをコンパイルするため、spinel のスレッド版ランタイムにのみ存在するグローバル（`sp_heap_lock`/`sp_sched_sleep`/`sp_sched_wait_io`）は未リネームのまま残る。現状 suppify のどのターゲットも `SP_THREADS` を有効化しないため今は無害。
 
 **注記**: main には Plan 1（コア: spinel→中立 C `.a`+ヘッダ、CRuby ネイティブ拡張から呼べることまで実証）がマージ済み。本 branch はその上に「ターゲットエミッタ層」＋「複数ライブラリ同居対応」を足したもの。
 
