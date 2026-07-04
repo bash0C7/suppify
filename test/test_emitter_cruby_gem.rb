@@ -73,6 +73,37 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
     end
   end
 
+  # version/license are consumer-controlled (a placeholder version and no
+  # presumed license by default) rather than suppify hardcoding a guess on
+  # the consumer's own code's behalf.
+  def test_gemspec_version_and_license_are_configurable
+    Dir.mktmpdir do |root|
+      lib = File.join(root, "spinel_lib")
+      FileUtils.mkdir_p(File.join(lib, "regexp"))
+      Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
+      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      out = File.join(root, "gem")
+
+      Suppify::Emitter::CRubyGem.emit(
+        lib_name: "addlib", c_source: "", header: "", exports: [],
+        spinel_lib: lib, out_dir: out,
+        discover_symbols: ->(_lib) { [] }, version: "2.3.4", license: "MIT",
+      )
+      gemspec = File.read(File.join(out, "addlib.gemspec"))
+      assert_match(/s\.version\s*=\s*"2\.3\.4"/, gemspec)
+      assert_match(/s\.license\s*=\s*"MIT"/, gemspec)
+    end
+  end
+
+  def test_gemspec_defaults_have_no_license_line
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      gemspec = File.read(File.join(out, "addlib.gemspec"))
+      assert_match(/s\.version\s*=\s*"0\.1\.0"/, gemspec)
+      assert_no_match(/s\.license/, gemspec)
+    end
+  end
+
   def test_binding_and_generated_c_present
     Dir.mktmpdir do |root|
       out = emit(root)

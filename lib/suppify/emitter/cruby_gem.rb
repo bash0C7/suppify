@@ -14,7 +14,8 @@ module Suppify
       module_function
 
       def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:,
-               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols))
+               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols),
+               version: "0.1.0", license: nil)
         ext = File.join(out_dir, "ext", lib_name)
         lib = File.join(out_dir, "lib")
         FileUtils.mkdir_p(ext)
@@ -30,7 +31,7 @@ module Suppify
 
         File.write(File.join(ext, "extconf.rb"), extconf(lib_name))
         File.write(File.join(lib, "#{lib_name}.rb"), %(require "#{lib_name}/#{lib_name}"\n))
-        File.write(File.join(out_dir, "#{lib_name}.gemspec"), gemspec(lib_name))
+        File.write(File.join(out_dir, "#{lib_name}.gemspec"), gemspec(lib_name, version, license))
 
         { gemspec: File.join(out_dir, "#{lib_name}.gemspec"), ext_dir: ext }
       end
@@ -51,13 +52,17 @@ module Suppify
         RUBY
       end
 
-      def gemspec(lib_name)
+      # version/license are consumer-controlled: a placeholder version is
+      # harmless, but presuming a license on the consumer's own code's
+      # behalf would not be, so it's omitted unless explicitly given.
+      def gemspec(lib_name, version, license)
         <<~RUBY
           Gem::Specification.new do |s|
             s.name        = "#{lib_name}"
-            s.version     = "0.0.0"
+            s.version     = "#{version}"
             s.summary     = "suppify-generated native extension"
             s.authors     = ["suppify"]
+            #{"s.license      = #{license.inspect}\n" if license}
             s.files       = Dir["lib/**/*.rb"] + Dir["ext/**/*.{c,h,rb}"]
             s.extensions  = ["ext/#{lib_name}/extconf.rb"]
             s.required_ruby_version = ">= 3.0"

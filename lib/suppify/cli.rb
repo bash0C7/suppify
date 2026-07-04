@@ -20,19 +20,24 @@ module Suppify
       lib_name = nil
       out_dir = "."
       target = "c"
+      gem_version = "0.1.0"
+      license = nil
       i = 0
       while i < argv.length
         case argv[i]
         when "-o" then lib_name = argv[i + 1]; i += 2
         when "-d", "--out-dir" then out_dir = argv[i + 1]; i += 2
         when "-t", "--target" then target = argv[i + 1]; i += 2
+        when "--gem-version" then gem_version = argv[i + 1]; i += 2
+        when "--license" then license = argv[i + 1]; i += 2
         else input = argv[i]; i += 1
         end
       end
       raise Error, "usage: suppify <app.rb> [-o name] [-d out_dir] [-t c|cruby|picoruby]" unless input
       raise Error, "unknown target #{target.inspect} (expected #{TARGETS.join('/')})" unless TARGETS.include?(target)
       lib_name ||= File.basename(input, ".rb")
-      { input: input, lib_name: lib_name, out_dir: out_dir, target: target }
+      { input: input, lib_name: lib_name, out_dir: out_dir, target: target,
+        gem_version: gem_version, license: license }
     end
 
     def run(argv, tmp_dir: ".suppify-tmp")
@@ -82,12 +87,17 @@ module Suppify
         gem_dir = File.join(opts[:out_dir], opts[:lib_name])
         Emitter::CRubyGem.emit(lib_name: opts[:lib_name], c_source: result[:c_source],
                                header: result[:header], exports: result[:exports],
-                               spinel_lib: spinel_lib, out_dir: gem_dir)
+                               spinel_lib: spinel_lib, out_dir: gem_dir,
+                               version: opts[:gem_version], license: opts[:license])
       else
         gem_dir = File.join(opts[:out_dir], "picoruby-#{opts[:lib_name]}")
+        # Unlike a CRuby gemspec, picoruby's mrbgem build hard-fails without
+        # a license, so an unset --license falls back to the ecosystem's
+        # common permissive default instead of forwarding a bare nil.
         Emitter::PicoRubyGem.emit(lib_name: opts[:lib_name], c_source: result[:c_source],
                                   header: result[:header], exports: result[:exports],
-                                  spinel_lib: spinel_lib, out_dir: gem_dir)
+                                  spinel_lib: spinel_lib, out_dir: gem_dir,
+                                  version: opts[:gem_version], license: opts[:license] || "MIT")
       end
       $stdout.puts "wrote #{kind} gem at #{gem_dir} (#{result[:exports].length} exports)"
     end

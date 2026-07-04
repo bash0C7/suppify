@@ -49,6 +49,40 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
     end
   end
 
+  # version/license are consumer-controlled (a placeholder version and no
+  # presumed license by default) rather than suppify hardcoding a guess on
+  # the consumer's own code's behalf.
+  def test_mrbgem_rake_version_and_license_are_configurable
+    Dir.mktmpdir do |root|
+      lib = File.join(root, "spinel_lib")
+      FileUtils.mkdir_p(File.join(lib, "regexp"))
+      Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
+      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      out = File.join(root, "picoruby-addlib")
+
+      Suppify::Emitter::PicoRubyGem.emit(
+        lib_name: "addlib", c_source: "", header: "", exports: [],
+        spinel_lib: lib, out_dir: out,
+        discover_symbols: ->(_lib) { [] }, version: "2.3.4", license: "MIT",
+      )
+      rake = File.read(File.join(out, "mrbgem.rake"))
+      assert_match(/spec\.version\s*=\s*"2\.3\.4"/, rake)
+      assert_match(/spec\.license\s*=\s*"MIT"/, rake)
+    end
+  end
+
+  # Unlike the cruby gemspec, picoruby's MRuby::Gem::Specification#setup
+  # hard-fails the build if license/author are unset -- omitting is not an
+  # option here, so the default is the ecosystem's common permissive choice.
+  def test_mrbgem_rake_defaults_to_mit_license
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      rake = File.read(File.join(out, "mrbgem.rake"))
+      assert_match(/spec\.version\s*=\s*"0\.1\.0"/, rake)
+      assert_match(/spec\.license\s*=\s*"MIT"/, rake)
+    end
+  end
+
   # Every vendored runtime symbol is namespaced per lib_name (via the same
   # SymbolPrefix prelude the cruby target uses) so a second suppify-built
   # mrbgem linked into the same firmware image doesn't collide with this

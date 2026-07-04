@@ -16,7 +16,8 @@ module Suppify
       module_function
 
       def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:, gem_name: nil,
-               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols))
+               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols),
+               version: "0.1.0", license: "MIT")
         gem_name ||= "picoruby-#{lib_name}"
         init_func = "mrb_#{gem_name.tr('-', '_')}_gem_init"
         src = File.join(out_dir, "src")
@@ -33,16 +34,20 @@ module Suppify
         symbols = discover_symbols.call(spinel_lib)
         File.write(File.join(src, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
 
-        File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name, lib_name))
+        File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name, lib_name, version, license))
         { gem_dir: out_dir, gem_name: gem_name, init_func: init_func }
       end
 
-      def mrbgem_rake(gem_name, lib_name)
+      # version/license are consumer-controlled: a placeholder version is
+      # harmless, but presuming a license on the consumer's own code's
+      # behalf would not be, so it's omitted unless explicitly given.
+      def mrbgem_rake(gem_name, lib_name, version, license)
         <<~RUBY
           MRuby::Gem::Specification.new('#{gem_name}') do |spec|
-            spec.license = 'MIT'
+            spec.version = "#{version}"
             spec.author  = 'suppify'
             spec.summary = 'suppify-generated native gem'
+            #{"spec.license = #{license.inspect}\n" if license}
             # Public neutral header for firmware/consumer code.
             spec.cc.include_paths << "\#{dir}/include"
             # libm for the spinel runtime's math (harmless where libm is in libc).
