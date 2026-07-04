@@ -46,6 +46,40 @@ class TestCLI < Test::Unit::TestCase
     assert_nil Suppify::CLI.parse(["app.rb"])[:license]
     assert_equal "MIT", Suppify::CLI.parse(["app.rb", "--license", "MIT"])[:license]
   end
+
+  # lib_name is spliced verbatim into #define replacement text by
+  # SymbolPrefix.prelude ("#define sym lib_name_sym"); a non-identifier
+  # character there breaks the C preprocessor's tokenization of every
+  # renamed runtime symbol (a hyphen splits the replacement into three
+  # tokens: an unrelated subtraction expression, not one valid name).
+  # Confirmed by an adversarial review: `-o my-lib` breaks the build with
+  # 20+ compile errors. Validated once at parse time instead of leaving
+  # every consumer to discover this via a wall of unrelated-looking errors.
+  def test_lib_name_must_be_a_valid_c_identifier
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "-o", "my-lib"]) }
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["my-app.rb"]) } # default derived from the filename
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "-o", "1lib"]) } # leading digit
+    assert_equal "my_lib", Suppify::CLI.parse(["app.rb", "-o", "my_lib"])[:lib_name]
+  end
+
+  # A lib_name equal to one of spinel's own runtime source basenames (e.g.
+  # sp_gc) makes the "c" target's archive gain two members both literally
+  # named sp_gc.o (the user's generated <lib_name>.c and spinel's own
+  # sp_gc.c), which some ar/toolchains mis-handle when unpacking by name.
+  def test_lib_name_must_not_collide_with_a_reserved_runtime_source_basename
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "-o", "sp_gc"]) }
+  end
+
+  # A flag with a missing or flag-shaped value must raise a clear error
+  # naming the actual problem, not silently swallow the next flag (or the
+  # positional filename) as if it were the value. Confirmed by an
+  # adversarial review: `parse(["--license", "-o", "mylib", "app.rb"])`
+  # previously set license to "-o" and dropped "mylib" without any error.
+  def test_flag_with_missing_or_flag_shaped_value_raises
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["--license", "-o", "mylib", "app.rb"]) }
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "--license"]) }
+    assert_raise(Suppify::Error) { Suppify::CLI.parse(["app.rb", "-o"]) }
+  end
 end
 
 class TestCLIEmitGem < Test::Unit::TestCase

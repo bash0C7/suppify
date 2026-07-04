@@ -40,11 +40,15 @@ module Suppify
 
       # version/license are consumer-controlled: a placeholder version is
       # harmless, but presuming a license on the consumer's own code's
-      # behalf would not be, so it's omitted unless explicitly given.
+      # behalf would not be, so it's omitted unless explicitly given. Both
+      # are rendered via #inspect (not raw interpolation) since mrbgem.rake
+      # is literal Ruby source that picoruby's Rake build loads and
+      # executes -- an unescaped value could break out of the string
+      # literal and splice arbitrary Ruby into the file.
       def mrbgem_rake(gem_name, lib_name, version, license)
         <<~RUBY
           MRuby::Gem::Specification.new('#{gem_name}') do |spec|
-            spec.version = "#{version}"
+            spec.version = #{version.inspect}
             spec.author  = 'suppify'
             spec.summary = 'suppify-generated native gem'
             #{"spec.license = #{license.inspect}\n" if license}

@@ -95,6 +95,36 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
     end
   end
 
+  # version, like license, must be rendered via #inspect, not raw
+  # interpolation -- the emitted gemspec is literal Ruby source that
+  # `gem build`/`bundle` load and execute. A version string containing a
+  # `"` (e.g. one carrying arbitrary text from a build variable) must not
+  # be able to break out of the string literal and splice extra Ruby.
+  def test_gemspec_escapes_version_safely
+    Dir.mktmpdir do |root|
+      lib = File.join(root, "spinel_lib")
+      FileUtils.mkdir_p(File.join(lib, "regexp"))
+      Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
+      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      out = File.join(root, "gem")
+
+      malicious = %(1.0"; system("touch #{root}/pwned"); s.summary = ")
+      Suppify::Emitter::CRubyGem.emit(
+        lib_name: "addlib", c_source: "", header: "", exports: [],
+        spinel_lib: lib, out_dir: out,
+        discover_symbols: ->(_lib) { [] }, version: malicious, license: nil,
+      )
+      gemspec_path = File.join(out, "addlib.gemspec")
+      assert_match(/s\.version\s*=\s*#{Regexp.escape(malicious.inspect)}/, File.read(gemspec_path))
+
+      # Escaped as a plain string, RubyGems' own version-format validation
+      # correctly rejects the nonsense content -- it never gets a chance to
+      # execute as Ruby either way.
+      assert_raise(ArgumentError) { load gemspec_path }
+      refute File.exist?(File.join(root, "pwned")), "version string executed as Ruby code"
+    end
+  end
+
   def test_gemspec_defaults_have_no_license_line
     Dir.mktmpdir do |root|
       out = emit(root)

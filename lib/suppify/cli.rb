@@ -7,12 +7,28 @@ require "suppify/rbs_seed"
 require "suppify/root_injector"
 require "suppify/emitter/cruby_gem"
 require "suppify/emitter/picoruby_gem"
+require "suppify/runtime_sources"
 
 module Suppify
   module CLI
     module_function
 
     TARGETS = %w[c cruby picoruby].freeze
+
+    # Only a valid C identifier is safe: lib_name is spliced verbatim into
+    # #define replacement text by SymbolPrefix.prelude ("#define sym
+    # lib_name_sym"), and any other character breaks the C preprocessor's
+    # tokenization of every renamed runtime symbol (a hyphen, for example,
+    # splits the replacement into an unrelated subtraction expression
+    # between two undeclared identifiers instead of one valid name).
+    LIB_NAME_PATTERN = /\A[A-Za-z_][A-Za-z0-9_]*\z/
+
+    # A lib_name equal to one of spinel's own runtime source basenames would
+    # give the "c" target's archive two members both literally named
+    # <basename>.o (the user's own generated <lib_name>.c and spinel's
+    # <basename>.c), which some ar/toolchains mis-handle when unpacking by
+    # member name.
+    RESERVED_LIB_NAMES = RuntimeSources::SOURCES.map { |s| File.basename(s, ".c") }.freeze
 
     # Minimal arg parsing (optparse-free so it compiles under spinel too).
     def parse(argv)
@@ -25,19 +41,38 @@ module Suppify
       i = 0
       while i < argv.length
         case argv[i]
-        when "-o" then lib_name = argv[i + 1]; i += 2
-        when "-d", "--out-dir" then out_dir = argv[i + 1]; i += 2
-        when "-t", "--target" then target = argv[i + 1]; i += 2
-        when "--gem-version" then gem_version = argv[i + 1]; i += 2
-        when "--license" then license = argv[i + 1]; i += 2
+        when "-o" then lib_name = flag_value!(argv, i); i += 2
+        when "-d", "--out-dir" then out_dir = flag_value!(argv, i); i += 2
+        when "-t", "--target" then target = flag_value!(argv, i); i += 2
+        when "--gem-version" then gem_version = flag_value!(argv, i); i += 2
+        when "--license" then license = flag_value!(argv, i); i += 2
         else input = argv[i]; i += 1
         end
       end
       raise Error, "usage: suppify <app.rb> [-o name] [-d out_dir] [-t c|cruby|picoruby]" unless input
       raise Error, "unknown target #{target.inspect} (expected #{TARGETS.join('/')})" unless TARGETS.include?(target)
       lib_name ||= File.basename(input, ".rb")
+      unless lib_name =~ LIB_NAME_PATTERN
+        raise Error, "invalid library name #{lib_name.inspect} (must be a valid C identifier: " \
+                     "letters, digits, underscore, not starting with a digit) -- pass -o explicitly"
+      end
+      if RESERVED_LIB_NAMES.include?(lib_name)
+        raise Error, "library name #{lib_name.inspect} collides with a spinel runtime source file " \
+                     "name -- pick a different -o"
+      end
       { input: input, lib_name: lib_name, out_dir: out_dir, target: target,
         gem_version: gem_version, license: license }
+    end
+
+    # Rejects a missing value or one that looks like another flag, so a
+    # forgotten/misordered argument (e.g. "--license -o mylib") raises a
+    # clear error instead of silently swallowing the next flag or the
+    # positional input filename as the value.
+    def flag_value!(argv, i)
+      flag = argv[i]
+      v = argv[i + 1]
+      raise Error, "#{flag} requires a value" if v.nil? || v.start_with?("-")
+      v
     end
 
     def run(argv, tmp_dir: ".suppify-tmp")

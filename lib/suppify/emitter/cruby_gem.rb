@@ -55,11 +55,15 @@ module Suppify
       # version/license are consumer-controlled: a placeholder version is
       # harmless, but presuming a license on the consumer's own code's
       # behalf would not be, so it's omitted unless explicitly given.
+      # Both are rendered via #inspect (not raw interpolation) since the
+      # emitted gemspec is literal Ruby source that gem build/bundle load
+      # and execute -- an unescaped value could break out of the string
+      # literal and splice arbitrary Ruby into the file.
       def gemspec(lib_name, version, license)
         <<~RUBY
           Gem::Specification.new do |s|
             s.name        = "#{lib_name}"
-            s.version     = "#{version}"
+            s.version     = #{version.inspect}
             s.summary     = "suppify-generated native extension"
             s.authors     = ["suppify"]
             #{"s.license      = #{license.inspect}\n" if license}

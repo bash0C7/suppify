@@ -71,6 +71,30 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
     end
   end
 
+  # version, like license, must be rendered via #inspect, not raw
+  # interpolation -- mrbgem.rake is literal Ruby source that picoruby's own
+  # Rake build loads and executes. A version string containing a `"` must
+  # not be able to break out of the string literal and splice extra Ruby.
+  def test_mrbgem_rake_escapes_version_safely
+    Dir.mktmpdir do |root|
+      lib = File.join(root, "spinel_lib")
+      FileUtils.mkdir_p(File.join(lib, "regexp"))
+      Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
+      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      out = File.join(root, "picoruby-addlib")
+
+      malicious = %(1.0"; system("touch #{root}/pwned"); spec.summary = ")
+      Suppify::Emitter::PicoRubyGem.emit(
+        lib_name: "addlib", c_source: "", header: "", exports: [],
+        spinel_lib: lib, out_dir: out,
+        discover_symbols: ->(_lib) { [] }, version: malicious, license: "MIT",
+      )
+      rake = File.read(File.join(out, "mrbgem.rake"))
+      assert_match(/spec\.version\s*=\s*#{Regexp.escape(malicious.inspect)}/, rake)
+      assert_no_match(/spec\.version\s*=\s*"#{Regexp.escape(malicious)}"/, rake)
+    end
+  end
+
   # Unlike the cruby gemspec, picoruby's MRuby::Gem::Specification#setup
   # hard-fails the build if license/author are unset -- omitting is not an
   # option here, so the default is the ecosystem's common permissive choice.
