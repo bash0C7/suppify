@@ -45,24 +45,42 @@ module Suppify
       ret  = NeutralType.map(sig.return_type)
       ps   = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n}" }
       plist = ps.empty? ? "void" : ps.join(", ")
-      args  = sig.params.map { |_, n| n }.join(", ")
       body = +"#{ret} #{e['public']}(#{plist}) {\n"
       body << "    g_suppi_err = 0;\n"
       body << "    jmp_buf jb;\n"
+      body << (ret == "void" ? "    if (setjmp(jb)) { suppi__capture(); return; }\n"
+                              : "    if (setjmp(jb)) { suppi__capture(); return 0; }\n")
+      body << "    sp_exc_arm(jb);\n"
+      args = sig.params.map { |t, n| string_arg(body, t, n) }.join(", ")
       if ret == "void"
-        body << "    if (setjmp(jb)) { suppi__capture(); return; }\n"
-        body << "    sp_exc_arm(jb);\n"
         body << "    #{e['cname']}(#{args});\n"
         body << "    sp_exc_disarm();\n"
       else
-        body << "    if (setjmp(jb)) { suppi__capture(); return 0; }\n"
-        body << "    sp_exc_arm(jb);\n"
         body << "    #{ret} r = #{e['cname']}(#{args});\n"
         body << "    sp_exc_disarm();\n"
         body << "    return r;\n"
       end
       body << "}\n"
       body
+    end
+
+    # Raw host-language string pointers lack spinel's sp_str_hdr / marker
+    # byte at ptr[-1]; passing one straight into a spinel-generated function
+    # is an out-of-bounds read. sp_str_dup_external mirrors what spinel
+    # itself does for foreign strings (argv/getenv).
+    #
+    # A duped string is just a bare C temporary until it reaches the callee
+    # -- with two or more string arguments, the NEXT dup's allocation can
+    # trigger a collection that sweeps an earlier, still-unrooted one before
+    # the call happens (confirmed empirically: sp_str_alloc collects BEFORE
+    # allocating, and a fresh string starts unmarked). SP_GC_ROOT is the same
+    # discipline spinel's own codegen uses for its local variables, so each
+    # duped string is declared as a named local and rooted immediately.
+    def string_arg(body, t, n)
+      return n unless NeutralType.kind(t) == :string
+      dup = "sp_dup_#{n}"
+      body << "    const char *#{dup} = sp_str_dup_external(#{n}); SP_GC_ROOT(#{dup});\n"
+      dup
     end
 
     def lib_init

@@ -42,11 +42,51 @@ class TestCRubyTargetIntegration < Test::Unit::TestCase
             print greet("world"), " "
             print even(4), " ", even(3), " "
             print truthy(true), " ", truthy(false), " "
+            print cat("foo", "bar"), " "
             begin; boom; rescue => e; print "raised:", e.message, " "; end
             print add(10, 20)  # per-call error reset: still works after boom
           RUBY
           out = IO.popen([RbConfig.ruby, "-e", script], &:read)
-          assert_equal "5 2.5 hi, world true false true false raised:x 30", out.strip
+          assert_equal "5 2.5 hi, world true false true false foobar raised:x 30", out.strip
+        end
+      end
+    end
+  end
+
+  # Regression test for a confirmed bug: a trampoline forwarding two string
+  # arguments as sp_str_dup_external(a), sp_str_dup_external(b) nested calls
+  # let the second dup's internal GC collect sweep the first (still-unrooted)
+  # duped string before either reached the callee. SPINEL_GC_STRESS=1 shrinks
+  # the collection threshold to 2048 bytes so this fires routinely instead of
+  # needing engineered heap state (see trampoline.rb's SP_GC_ROOT fix).
+  def test_cat_survives_gc_stress_with_multiple_string_arguments
+    omit("spinel not on PATH / SPINEL_LIB unset") unless spinel_available?
+
+    Dir.mktmpdir do |dir|
+      FileUtils.cp(File.expand_path("fixtures/add.rb", __dir__), File.join(dir, "add.rb"))
+      FileUtils.cp(File.expand_path("fixtures/add.rbs", __dir__), File.join(dir, "add.rbs"))
+
+      Dir.chdir(dir) do
+        assert_equal 0, Suppify::CLI.run(["add.rb", "-o", "addlib", "-t", "cruby"])
+        ext = File.join(dir, "addlib", "ext", "addlib")
+        Dir.chdir(ext) do
+          assert system(RbConfig.ruby, "extconf.rb", out: File::NULL), "extconf failed"
+          assert system("make", out: File::NULL), "make failed"
+          bundle = Dir.glob("*.{so,bundle}").first
+
+          script = <<~RUBY
+            require_relative #{File.basename(bundle, '.*').inspect}
+            500.times do |i|
+              a = "AAAA-\#{i}-" + ("x" * 200)
+              b = "BBBB-\#{i}-" + ("y" * 200)
+              got = cat(a, b)
+              raise "mismatch at \#{i}: \#{got}" unless got == a + b
+            end
+            print "ok"
+          RUBY
+          out = IO.popen({ "SPINEL_GC_STRESS" => "1" }, [RbConfig.ruby, "-e", script], &:read)
+          assert $?.success?, "child process crashed under GC stress: #{out}"
+          assert_equal "ok", out.strip
         end
       end
     end

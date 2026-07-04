@@ -10,6 +10,10 @@ class TestTrampoline < Test::Unit::TestCase
         "sig" => Suppify::Signature.new("mrb_int", [["mrb_int","a"],["mrb_int","b"]]) },
       { "public" => "boom",  "cname" => "sp_boom",
         "sig" => Suppify::Signature.new("void", []) },
+      { "public" => "greet", "cname" => "sp_greet",
+        "sig" => Suppify::Signature.new("const char *", [["const char *", "name"]]) },
+      { "public" => "cat",   "cname" => "sp_cat",
+        "sig" => Suppify::Signature.new("const char *", [["const char *", "a"], ["const char *", "b"]]) },
     ]
     @c = Suppify::Trampoline.render(@exports)
   end
@@ -57,5 +61,29 @@ class TestTrampoline < Test::Unit::TestCase
     assert_match(/g_suppi_msg = g_suppi_msgbuf;/, @c)
     # error path routes through the capture helper, which disarms + flags
     assert_match(/if \(setjmp\(jb\)\) \{ suppi__capture\(\); return( 0)?; \}/, @c)
+  end
+
+  # spinel's strings carry a header (sp_str_hdr) and a marker byte at
+  # ptr[-1]; a raw host-language string buffer has neither, so passing it
+  # straight into a spinel-generated function is an out-of-bounds read.
+  # sp_str_dup_external mirrors what spinel itself does for argv/getenv.
+  def test_wraps_string_arguments_in_sp_str_dup_external
+    assert_match(/const char \*sp_dup_name = sp_str_dup_external\(name\);/, @c)
+    assert_match(/const char \* r = sp_greet\(sp_dup_name\);/, @c)
+    # non-string args must be passed through unwrapped
+    assert_match(/intptr_t r = sp_add\(a, b\);/, @c)
+  end
+
+  # A duped string is only a bare C temporary until it's passed to the
+  # spinel-generated callee -- nothing marks it as GC-reachable. With two
+  # string arguments, the SECOND sp_str_dup_external's internal allocation
+  # can trigger a collection that sweeps the FIRST (still-unrooted) duped
+  # string before the call happens. SP_GC_ROOT (the same discipline spinel's
+  # own codegen uses for its local variables) keeps each duped string alive
+  # from the moment it's created.
+  def test_roots_each_duped_string_before_the_next_dup
+    assert_match(/const char \*sp_dup_a = sp_str_dup_external\(a\); SP_GC_ROOT\(sp_dup_a\);/, @c)
+    assert_match(/const char \*sp_dup_b = sp_str_dup_external\(b\); SP_GC_ROOT\(sp_dup_b\);/, @c)
+    assert_match(/const char \* r = sp_cat\(sp_dup_a, sp_dup_b\);/, @c)
   end
 end

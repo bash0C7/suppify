@@ -5,4 +5,5 @@ class Object
   def greet: (String) -> String
   def even: (Integer) -> bool
   def truthy: (bool) -> bool
+  def cat: (String, String) -> String
 end
