@@ -2,6 +2,7 @@
 require "fileutils"
 require "suppify/binding/cruby"
 require "suppify/runtime_sources"
+require "suppify/symbol_prefix"
 
 module Suppify
   module Emitter
@@ -12,7 +13,8 @@ module Suppify
     module CRubyGem
       module_function
 
-      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:)
+      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:,
+               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols))
         ext = File.join(out_dir, "ext", lib_name)
         lib = File.join(out_dir, "lib")
         FileUtils.mkdir_p(ext)
@@ -22,6 +24,9 @@ module Suppify
         File.write(File.join(ext, "#{lib_name}.h"), header)
         File.write(File.join(ext, "binding.c"), Binding::CRuby.render(lib_name, exports))
         RuntimeSources.copy_flat(spinel_lib, ext)
+
+        symbols = discover_symbols.call(spinel_lib)
+        File.write(File.join(ext, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
 
         File.write(File.join(ext, "extconf.rb"), extconf(lib_name))
         File.write(File.join(lib, "#{lib_name}.rb"), %(require "#{lib_name}/#{lib_name}"\n))
@@ -35,12 +40,11 @@ module Suppify
           require "mkmf"
           # libm for the runtime's math (sp_format); harmless where libm is in libc.
           $LDFLAGS << " -lm"
-          # The bundled (unmodified) spinel runtime sources trip a couple of
-          # harmless warnings under the host CFLAGS (e.g. spinel's own
-          # sp_types.h unconditionally #defines _DARWIN_C_SOURCE, colliding
-          # with mkmf's -D_DARWIN_C_SOURCE=1 on macOS). Suppressed so a clean
-          # build isn't mistaken for a problem in the generated code.
-          $CFLAGS << " -Wno-macro-redefined -Wno-missing-noreturn"
+          # Namespaces every vendored spinel runtime symbol to this library
+          # (so a second suppify gem loaded into the same process doesn't
+          # collide with this one's runtime state) and silences the bundled
+          # runtime's own harmless warnings. See Suppify::SymbolPrefix.
+          $CFLAGS << " -include \#{__dir__}/#{lib_name}_prelude.h"
           # All .c in this dir (generated TU, binding, flattened spinel runtime)
           # are picked up by mkmf's default *.c globbing.
           create_makefile("#{lib_name}/#{lib_name}")

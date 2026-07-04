@@ -5,3 +5,4 @@ def greet(name) = "hi, " + name
 def even(n) = n % 2 == 0
 def truthy(flag) = flag
 def cat(a, b) = a + b
+def nully = "a\0b"

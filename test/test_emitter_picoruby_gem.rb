@@ -22,6 +22,7 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
                   "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) }],
       spinel_lib: lib,
       out_dir: out,
+      discover_symbols: ->(_lib) { %w[sp_gc_alloc] },
     )
     out
   end
@@ -45,11 +46,23 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       rake = File.read(File.join(out, "mrbgem.rake"))
       assert_match(/MRuby::Gem::Specification\.new\('picoruby-addlib'\)/, rake)
       assert_match(/spec\.cc\.include_paths << "#\{dir\}\/include"/, rake)
-      # Same harmless-but-noisy warnings as the cruby target (spinel's own
-      # sp_types.h unconditionally #defines _DARWIN_C_SOURCE); -Wno-* for an
-      # unrecognized name is silently accepted by both gcc and clang, so this
-      # is safe across the cross toolchains a picoruby build_config selects.
-      assert_match(/spec\.cc\.flags << '-Wno-macro-redefined' << '-Wno-missing-noreturn'/, rake)
+    end
+  end
+
+  # Every vendored runtime symbol is namespaced per lib_name (via the same
+  # SymbolPrefix prelude the cruby target uses) so a second suppify-built
+  # mrbgem linked into the same firmware image doesn't collide with this
+  # one's spinel runtime state; the prelude also silences the bundled
+  # runtime's own harmless warnings.
+  def test_emits_symbol_prefix_prelude_and_wires_it_into_the_build
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      prelude = File.join(out, "src", "addlib_prelude.h")
+      assert File.exist?(prelude)
+      assert_match(/#define sp_gc_alloc addlib_sp_gc_alloc/, File.read(prelude))
+
+      rake = File.read(File.join(out, "mrbgem.rake"))
+      assert_match(/spec\.cc\.flags << "-include #\{dir\}\/src\/addlib_prelude\.h"/, rake)
     end
   end
 

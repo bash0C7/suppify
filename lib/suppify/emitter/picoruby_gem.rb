@@ -2,6 +2,7 @@
 require "fileutils"
 require "suppify/binding/mruby"
 require "suppify/runtime_sources"
+require "suppify/symbol_prefix"
 
 module Suppify
   module Emitter
@@ -14,7 +15,8 @@ module Suppify
     module PicoRubyGem
       module_function
 
-      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:, gem_name: nil)
+      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:, gem_name: nil,
+               discover_symbols: SymbolPrefix.method(:discover_runtime_symbols))
         gem_name ||= "picoruby-#{lib_name}"
         init_func = "mrb_#{gem_name.tr('-', '_')}_gem_init"
         src = File.join(out_dir, "src")
@@ -28,11 +30,14 @@ module Suppify
         File.write(File.join(src, "binding.c"), Binding::Mruby.render(lib_name, init_func, exports))
         RuntimeSources.copy_flat(spinel_lib, src)
 
-        File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name))
+        symbols = discover_symbols.call(spinel_lib)
+        File.write(File.join(src, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
+
+        File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name, lib_name))
         { gem_dir: out_dir, gem_name: gem_name, init_func: init_func }
       end
 
-      def mrbgem_rake(gem_name)
+      def mrbgem_rake(gem_name, lib_name)
         <<~RUBY
           MRuby::Gem::Specification.new('#{gem_name}') do |spec|
             spec.license = 'MIT'
@@ -42,12 +47,11 @@ module Suppify
             spec.cc.include_paths << "\#{dir}/include"
             # libm for the spinel runtime's math (harmless where libm is in libc).
             spec.linker.libraries << 'm'
-            # Same harmless spinel-runtime-origin warnings as the cruby target
-            # (e.g. sp_types.h unconditionally #defines _DARWIN_C_SOURCE).
-            # -Wno-* for an unrecognized name is silently accepted by both
-            # gcc and clang, so this is safe across whatever cross toolchain
-            # the consuming build_config selects.
-            spec.cc.flags << '-Wno-macro-redefined' << '-Wno-missing-noreturn'
+            # Namespaces every vendored spinel runtime symbol to this library
+            # (so a second suppify mrbgem linked into the same firmware image
+            # doesn't collide with this one's runtime state) and silences the
+            # bundled runtime's own harmless warnings. See Suppify::SymbolPrefix.
+            spec.cc.flags << "-include \#{dir}/src/#{lib_name}_prelude.h"
           end
         RUBY
       end

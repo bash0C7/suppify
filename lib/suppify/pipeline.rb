@@ -18,7 +18,7 @@ module Suppify
     def run
       exports = build_exports
       c = MainRenamer.rename(@c_source)
-      c = c + Trampoline.render(exports)
+      c = c + Trampoline.render(exports, @lib_name)
       header = Header.render(@lib_name, exports)
       { exports: exports, c_source: c, header: header }
     end

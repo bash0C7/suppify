@@ -6,4 +6,5 @@ class Object
   def even: (Integer) -> bool
   def truthy: (bool) -> bool
   def cat: (String, String) -> String
+  def nully: () -> String
 end

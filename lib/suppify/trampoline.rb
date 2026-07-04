@@ -4,20 +4,32 @@ require "suppify/neutral_type"
 module Suppify
   # Renders the C block appended to the generated translation unit:
   # extern trampolines (with a per-call setjmp exception barrier), the error
-  # query API, and sp_lib_init.
+  # query API, and <lib_name>_init.
   module Trampoline
     module_function
 
-    def render(exports)
+    # lib_name namespaces the handful of symbols this file exports with
+    # external linkage (init/error/error_message) so two suppify libraries
+    # linked into the same binary don't collide -- spinel's runtime state
+    # (armed by sp_lib_init) is otherwise a set of process-wide globals meant
+    # for exactly one generated program per binary. Internal statics
+    # (g_suppi_err et al.) already have file-local linkage and need no
+    # namespacing.
+    def render(exports, lib_name)
       out = +"\n/* === suppify appended trampolines === */\n"
       out << "static int g_suppi_err = 0;\n"
       out << "static const char *g_suppi_msg = 0;\n"
       out << "static char g_suppi_msgbuf[256];\n"
       out << capture
       exports.each { |e| out << one(e) << "\n" }
-      out << "int suppi_error(void) { return g_suppi_err; }\n"
-      out << "const char *suppi_error_message(void) { return g_suppi_msg; }\n\n"
-      out << lib_init
+      out << "int #{lib_name}_error(void) { return g_suppi_err; }\n"
+      out << "const char *#{lib_name}_error_message(void) { return g_suppi_msg; }\n"
+      # rb_str_new_cstr/mrb_str_new_cstr are strlen-based, silently truncating
+      # a String return at its first embedded NUL. sp_str_byte_len recovers
+      # spinel's own tracked byte length (from the string header, not
+      # strlen), bridged here so a binding can size the Ruby string correctly.
+      out << "size_t #{lib_name}_str_len(const char *s) { return sp_str_byte_len(s); }\n\n"
+      out << lib_init(lib_name)
       out
     end
 
@@ -48,8 +60,15 @@ module Suppify
       body = +"#{ret} #{e['public']}(#{plist}) {\n"
       body << "    g_suppi_err = 0;\n"
       body << "    jmp_buf jb;\n"
-      body << (ret == "void" ? "    if (setjmp(jb)) { suppi__capture(); return; }\n"
-                              : "    if (setjmp(jb)) { suppi__capture(); return 0; }\n")
+      # __attribute__((cleanup)) (what SP_GC_ROOT uses, see string_arg below)
+      # never runs across a longjmp landing back at this setjmp -- it only
+      # fires on normal scope exit. Snapshotting sp_gc_nroots here and
+      # restoring it on the caught-exception path undoes any root left
+      # dangling by an exception raised while a duped string was rooted;
+      # once we've decided to abort the call nothing rooted during it matters.
+      body << "    int sp_root_base = sp_gc_nroots;\n"
+      body << (ret == "void" ? "    if (setjmp(jb)) { suppi__capture(); sp_gc_nroots = sp_root_base; return; }\n"
+                              : "    if (setjmp(jb)) { suppi__capture(); sp_gc_nroots = sp_root_base; return 0; }\n")
       body << "    sp_exc_arm(jb);\n"
       args = sig.params.map { |t, n| string_arg(body, t, n) }.join(", ")
       if ret == "void"
@@ -83,9 +102,9 @@ module Suppify
       dup
     end
 
-    def lib_init
+    def lib_init(lib_name)
       <<~C
-        void sp_lib_init(void) {
+        void #{lib_name}_init(void) {
             static int done = 0; if (done) return; done = 1;
             char *av[] = { (char *)"lib", 0 };
             sp__main(1, av);

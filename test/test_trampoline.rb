@@ -15,7 +15,7 @@ class TestTrampoline < Test::Unit::TestCase
       { "public" => "cat",   "cname" => "sp_cat",
         "sig" => Suppify::Signature.new("const char *", [["const char *", "a"], ["const char *", "b"]]) },
     ]
-    @c = Suppify::Trampoline.render(@exports)
+    @c = Suppify::Trampoline.render(@exports, "addlib")
   end
 
   def test_emits_extern_trampoline_calling_static
@@ -40,15 +40,20 @@ class TestTrampoline < Test::Unit::TestCase
     assert_match(/void boom\(void\) \{\n\s*g_suppi_err = 0;/, @c)
   end
 
+  # suppi_error/suppi_error_message/sp_lib_init are per-library names (not
+  # generic ones): spinel's runtime is a set of process-wide globals shared
+  # by everything linked against it, so two suppify libraries in the same
+  # binary would otherwise define identical symbols and fail to link. See
+  # SymbolPrefix for the analogous fix applied to the vendored runtime.
   def test_includes_exception_barrier_and_error_api
     assert_match(/setjmp/, @c)
     assert_match(/sp_exc_arm/, @c)
-    assert_match(/int suppi_error\(void\)/, @c)
-    assert_match(/const char \*suppi_error_message\(void\)/, @c)
+    assert_match(/int addlib_error\(void\)/, @c)
+    assert_match(/const char \*addlib_error_message\(void\)/, @c)
   end
 
   def test_includes_sp_lib_init
-    assert_match(/void sp_lib_init\(void\)/, @c)
+    assert_match(/void addlib_init\(void\)/, @c)
     assert_match(/sp__main\(1, av\);/, @c)
     # C string literals are `char[N]` (not const-qualified), but a strict
     # compiler still warns on assigning one to a `char *` slot; the explicit
@@ -64,7 +69,7 @@ class TestTrampoline < Test::Unit::TestCase
     assert_match(/sp_exc_msg\[sp_exc_top - 1\]/, @c)
     assert_match(/g_suppi_msg = g_suppi_msgbuf;/, @c)
     # error path routes through the capture helper, which disarms + flags
-    assert_match(/if \(setjmp\(jb\)\) \{ suppi__capture\(\); return( 0)?; \}/, @c)
+    assert_match(/if \(setjmp\(jb\)\) \{ suppi__capture\(\); sp_gc_nroots = sp_root_base; return( 0)?; \}/, @c)
   end
 
   # spinel's strings carry a header (sp_str_hdr) and a marker byte at
@@ -89,5 +94,25 @@ class TestTrampoline < Test::Unit::TestCase
     assert_match(/const char \*sp_dup_a = sp_str_dup_external\(a\); SP_GC_ROOT\(sp_dup_a\);/, @c)
     assert_match(/const char \*sp_dup_b = sp_str_dup_external\(b\); SP_GC_ROOT\(sp_dup_b\);/, @c)
     assert_match(/const char \* r = sp_cat\(sp_dup_a, sp_dup_b\);/, @c)
+  end
+
+  # SP_GC_ROOT's cleanup-attribute pop never runs across a longjmp landing
+  # back at our own setjmp (cleanup only fires on normal scope exit) -- so an
+  # exception raised while a duped string is rooted would otherwise leave
+  # sp_gc_nroots permanently incremented. Snapshotting it at entry and
+  # restoring it on the caught-exception path undoes any such leak: once
+  # we've decided to abort the call, nothing rooted during it is needed.
+  def test_restores_gc_root_count_on_caught_exception
+    assert_match(/int sp_root_base = sp_gc_nroots;/, @c)
+    assert_match(/if \(setjmp\(jb\)\) \{ suppi__capture\(\); sp_gc_nroots = sp_root_base; return( 0)?; \}/, @c)
+  end
+
+  # rb_str_new_cstr/mrb_str_new_cstr are strlen-based, so a String return
+  # containing an embedded NUL gets silently truncated. sp_str_byte_len
+  # recovers spinel's own tracked byte length (from the string header, not
+  # strlen); this bridges it through the neutral boundary so a binding can
+  # build a correctly-sized Ruby string instead of guessing via strlen.
+  def test_exposes_str_len_bridge_to_spinels_tracked_byte_length
+    assert_match(/size_t addlib_str_len\(const char \*s\) \{ return sp_str_byte_len\(s\); \}/, @c)
   end
 end

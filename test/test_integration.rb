@@ -28,19 +28,23 @@ class TestIntegration < Test::Unit::TestCase
           #include "addlib.h"
           #include <stdio.h>
           int main(void){
-              sp_lib_init();
+              addlib_init();
               printf("%ld\\n", (long)add(2, 3));
               printf("%.1f\\n", half(5.0));
               printf("%s\\n", greet("world"));
               printf("%d\\n", even(4));
               printf("%d\\n", even(3));
+              /* strlen(nully()) would report 1 (truncated at the embedded
+                 NUL); the str_len bridge recovers the real byte length. */
+              printf("%zu\\n", addlib_str_len(nully()));
               boom();
-              printf("%d\\n", suppi_error());
+              printf("%d\\n", addlib_error());
               return 0;
           }
         C
-        spinel_lib = ENV["SPINEL_LIB"] || `dirname $(dirname $(which spinel))`.strip + "/lib"
-        ok = system("cc harness.c -I. -I#{spinel_lib} -L. -laddlib -lspinel_rt -lm -o harness")
+        # Self-contained: lib<name>.a bundles a per-library-namespaced copy of
+        # the spinel runtime, so no separate -lspinel_rt is needed.
+        ok = system("cc harness.c -I. -L. -laddlib -lm -o harness")
         assert ok, "harness failed to compile/link"
         out = `./harness`.strip.split("\n")
         assert_equal "5", out[0]
@@ -48,7 +52,8 @@ class TestIntegration < Test::Unit::TestCase
         assert_equal "hi, world", out[2]
         assert_equal "1", out[3]
         assert_equal "0", out[4]
-        assert_equal "1", out[5]
+        assert_equal "3", out[5]
+        assert_equal "1", out[6]
       end
     end
   end

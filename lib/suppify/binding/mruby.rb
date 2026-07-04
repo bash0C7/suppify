@@ -24,13 +24,16 @@ module Suppify
         int: "(intptr_t)", float: "", string: "", bool: "(int)",
       }.freeze
 
-      # return conversion (neutral C `r` -> mrb_value), by kind
+      # return conversion (neutral C `r` -> mrb_value), by kind. :string is a
+      # lambda (not a fixed string) because it needs the per-library str_len
+      # bridge: mrb_str_new_cstr is strlen-based and would silently truncate
+      # a return value at an embedded NUL.
       OUT = {
-        int:    "return mrb_fixnum_value((mrb_int)r);",
-        float:  "return mrb_float_value(mrb, r);",
-        string: "return mrb_str_new_cstr(mrb, r);",
-        bool:   "return mrb_bool_value(r);",
-        void:   "return mrb_nil_value();",
+        int:    ->(_lib_name) { "return mrb_fixnum_value((mrb_int)r);" },
+        float:  ->(_lib_name) { "return mrb_float_value(mrb, r);" },
+        string: ->(lib_name) { "return mrb_str_new(mrb, r, #{lib_name}_str_len(r));" },
+        bool:   ->(_lib_name) { "return mrb_bool_value(r);" },
+        void:   ->(_lib_name) { "return mrb_nil_value();" },
       }.freeze
 
       def render(header_name, init_func, exports)
@@ -38,12 +41,12 @@ module Suppify
         out << "#include <mruby.h>\n"
         out << "#include <mruby/string.h>\n"
         out << "#include \"#{header_name}.h\"\n\n"
-        exports.each { |e| out << wrapper(e) << "\n" }
-        out << gem_init(init_func, exports)
+        exports.each { |e| out << wrapper(header_name, e) << "\n" }
+        out << gem_init(header_name, init_func, exports)
         out
       end
 
-      def wrapper(e)
+      def wrapper(lib_name, e)
         name   = e["public"]
         sig    = e["sig"]
         params = sig.params
@@ -63,8 +66,8 @@ module Suppify
         else
           b << "    #{NeutralType.map(sig.return_type)} r = #{name}(#{call_args});\n"
         end
-        b << "    if (suppi_error()) mrb_raise(mrb, E_RUNTIME_ERROR, suppi_error_message());\n"
-        b << "    #{OUT.fetch(ret_kind)}\n"
+        b << "    if (#{lib_name}_error()) mrb_raise(mrb, E_RUNTIME_ERROR, #{lib_name}_error_message());\n"
+        b << "    #{OUT.fetch(ret_kind).call(lib_name)}\n"
         b << "}\n"
         b
       end
@@ -84,10 +87,10 @@ module Suppify
         end.join(" ")
       end
 
-      def gem_init(init_func, exports)
+      def gem_init(lib_name, init_func, exports)
         final_func = init_func.sub(/_gem_init\z/, "_gem_final")
         b = +"void #{init_func}(mrb_state *mrb) {\n"
-        b << "    sp_lib_init();\n"
+        b << "    #{lib_name}_init();\n"
         exports.each do |e|
           n = e["public"]
           arity = e["sig"].params.length

@@ -43,11 +43,15 @@ class TestCRubyTargetIntegration < Test::Unit::TestCase
             print even(4), " ", even(3), " "
             print truthy(true), " ", truthy(false), " "
             print cat("foo", "bar"), " "
+            # rb_str_new_cstr (strlen-based) would silently truncate this at
+            # the embedded NUL; the fix uses lib_name_str_len for the real
+            # byte length. bytesize must be 3, not 1.
+            print nully.bytesize, " "
             begin; boom; rescue => e; print "raised:", e.message, " "; end
             print add(10, 20)  # per-call error reset: still works after boom
           RUBY
           out = IO.popen([RbConfig.ruby, "-e", script], &:read)
-          assert_equal "5 2.5 hi, world true false true false foobar raised:x 30", out.strip
+          assert_equal "5 2.5 hi, world true false true false foobar 3 raised:x 30", out.strip
         end
       end
     end

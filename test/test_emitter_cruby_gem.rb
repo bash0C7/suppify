@@ -22,6 +22,7 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
                   "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) }],
       spinel_lib: lib,
       out_dir: out,
+      discover_symbols: ->(_lib) { %w[sp_gc_alloc] },
     )
     out
   end
@@ -41,17 +42,29 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
     end
   end
 
+  # Every vendored runtime symbol (~600, discovered via a real compile+nm --
+  # faked here for a fast unit test) is namespaced per lib_name so a second
+  # suppify-built gem linked into the same process doesn't collide with this
+  # one's spinel runtime state. Force-included ahead of every .c file mkmf
+  # compiles for this extension (generated TU, binding, bundled runtime).
+  def test_emits_symbol_prefix_prelude_and_wires_it_into_the_build
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      ext = File.join(out, "ext", "addlib")
+      prelude = File.join(ext, "addlib_prelude.h")
+      assert File.exist?(prelude)
+      assert_match(/#define sp_gc_alloc addlib_sp_gc_alloc/, File.read(prelude))
+
+      extconf = File.read(File.join(ext, "extconf.rb"))
+      assert_match(/-include .*addlib_prelude\.h/, extconf)
+    end
+  end
+
   def test_extconf_and_gemspec_wire_the_extension
     Dir.mktmpdir do |root|
       out = emit(root)
       extconf = File.read(File.join(out, "ext", "addlib", "extconf.rb"))
       assert_match(/create_makefile\("addlib\/addlib"\)/, extconf)
-      # The bundled (unmodified) spinel runtime sources trip a couple of
-      # harmless warnings under the host Ruby's CFLAGS (e.g. spinel's
-      # sp_types.h unconditionally #defines _DARWIN_C_SOURCE, colliding with
-      # mkmf's own -D_DARWIN_C_SOURCE=1). Suppressed so a clean `make` isn't
-      # mistaken for a real problem in generated code.
-      assert_match(/\$CFLAGS << " -Wno-macro-redefined -Wno-missing-noreturn"/, extconf)
       gemspec = File.read(File.join(out, "addlib.gemspec"))
       assert_match(/s\.name\s*=\s*"addlib"/, gemspec)
       assert_match(%r{s\.extensions\s*=\s*\["ext/addlib/extconf\.rb"\]}, gemspec)

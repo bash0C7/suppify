@@ -46,11 +46,11 @@ class TestRubyExtIntegration < Test::Unit::TestCase
           }
           static VALUE rb_boom_error(VALUE self) {
               boom();
-              return INT2NUM(suppi_error());
+              return INT2NUM(addlib_error());
           }
 
           void Init_ext_suppify(void) {
-              sp_lib_init();
+              addlib_init();
               VALUE mod = rb_define_module("ExtSuppify");
               rb_define_module_function(mod, "add", rb_add, 2);
               rb_define_module_function(mod, "half", rb_half, 1);
@@ -63,7 +63,9 @@ class TestRubyExtIntegration < Test::Unit::TestCase
         File.write("extconf.rb", <<~RUBY)
           require "mkmf"
           $LDFLAGS << " -L."
-          $LIBS << " -laddlib -lspinel_rt -lm"
+          # Self-contained: lib<name>.a bundles a per-library-namespaced copy
+          # of the spinel runtime, so no separate -lspinel_rt is needed.
+          $LIBS << " -laddlib -lm"
           create_makefile("ext_suppify")
         RUBY
 

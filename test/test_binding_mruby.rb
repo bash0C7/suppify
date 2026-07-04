@@ -41,10 +41,14 @@ class TestBindingMruby < Test::Unit::TestCase
     assert_match(/return mrb_float_value\(mrb, r\);/, @c)
   end
 
+  # mrb_str_new_cstr is strlen-based, silently truncating a String return
+  # that contains an embedded NUL. lib_name_str_len recovers spinel's own
+  # tracked byte length, so mrb_str_new (explicit length) builds the mruby
+  # string with the correct size regardless of embedded NULs.
   def test_string_wrapper
     assert_match(/const char \*a0;/, @c)
     assert_match(/mrb_get_args\(mrb, "z", &a0\);/, @c)
-    assert_match(/return mrb_str_new_cstr\(mrb, r\);/, @c)
+    assert_match(/return mrb_str_new\(mrb, r, addlib_str_len\(r\)\);/, @c)
   end
 
   def test_bool_wrapper
@@ -60,13 +64,15 @@ class TestBindingMruby < Test::Unit::TestCase
     assert_match(/return mrb_nil_value\(\);/, @c)
   end
 
+  # Per-library error API name (not the generic "suppi_error") so two suppify
+  # libraries linked into the same firmware image don't collide.
   def test_error_raised_after_each_call
-    assert_match(/if \(suppi_error\(\)\) mrb_raise\(mrb, E_RUNTIME_ERROR, suppi_error_message\(\)\);/, @c)
+    assert_match(/if \(addlib_error\(\)\) mrb_raise\(mrb, E_RUNTIME_ERROR, addlib_error_message\(\)\);/, @c)
   end
 
   def test_gem_init_defines_kernel_methods
     assert_match(/void mrb_picoruby_addlib_gem_init\(mrb_state \*mrb\)/, @c)
-    assert_match(/sp_lib_init\(\);/, @c)
+    assert_match(/addlib_init\(\);/, @c)
     assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "add", \w+, MRB_ARGS_REQ\(2\)\);/, @c)
     assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "boom", \w+, MRB_ARGS_REQ\(0\)\);/, @c)
   end

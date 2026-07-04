@@ -7,10 +7,11 @@ module Suppify
 
     def render(lib_name, exports)
       guard = "#{lib_name.upcase}_H"
-      out = +"#ifndef #{guard}\n#define #{guard}\n\n#include <stdint.h>\n\n"
-      out << "void sp_lib_init(void);\n"
-      out << "int suppi_error(void);\n"
-      out << "const char *suppi_error_message(void);\n\n"
+      out = +"#ifndef #{guard}\n#define #{guard}\n\n#include <stdint.h>\n#include <stddef.h>\n\n"
+      out << "void #{lib_name}_init(void);\n"
+      out << "int #{lib_name}_error(void);\n"
+      out << "const char *#{lib_name}_error_message(void);\n"
+      out << "size_t #{lib_name}_str_len(const char *s);\n\n"
       exports.each do |e|
         sig = e["sig"]
         ret = NeutralType.map(sig.return_type)

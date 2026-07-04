@@ -38,9 +38,13 @@ class TestBindingCRuby < Test::Unit::TestCase
     assert_match(/return DBL2NUM\(r\);/, @c)
   end
 
+  # rb_str_new_cstr is strlen-based, silently truncating a String return that
+  # contains an embedded NUL. lib_name_str_len recovers spinel's own tracked
+  # byte length, so rb_str_new (explicit length) builds the Ruby string with
+  # the correct size regardless of embedded NULs.
   def test_string_wrapper
     assert_match(/greet\(StringValueCStr\(a0\)\)/, @c)
-    assert_match(/return rb_str_new_cstr\(r\);/, @c)
+    assert_match(/return rb_str_new\(r, addlib_str_len\(r\)\);/, @c)
   end
 
   def test_bool_wrapper
@@ -53,13 +57,15 @@ class TestBindingCRuby < Test::Unit::TestCase
     assert_match(/return Qnil;/, @c)
   end
 
+  # Per-library error API name (not the generic "suppi_error") so two suppify
+  # libraries linked into the same binary don't collide.
   def test_error_is_raised_after_each_call
-    assert_match(/if \(suppi_error\(\)\) rb_raise\(rb_eRuntimeError, "%s", suppi_error_message\(\)\);/, @c)
+    assert_match(/if \(addlib_error\(\)\) rb_raise\(rb_eRuntimeError, "%s", addlib_error_message\(\)\);/, @c)
   end
 
   def test_init_registers_all_as_global_functions
     assert_match(/void Init_addlib\(void\)/, @c)
-    assert_match(/sp_lib_init\(\);/, @c)
+    assert_match(/addlib_init\(\);/, @c)
     assert_match(/rb_define_global_function\("add", \w+, 2\);/, @c)
     assert_match(/rb_define_global_function\("half", \w+, 1\);/, @c)
     assert_match(/rb_define_global_function\("boom", \w+, 0\);/, @c)
