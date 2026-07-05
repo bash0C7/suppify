@@ -1,7 +1,7 @@
 # HANDOFF — suppify
 
 状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も2ラウンドの fresh-context 敵対的検証にかけて計5件の実バグを発見・修正済み**。
-worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**117 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 117 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。
+worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**113 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 113 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。（コード簡素化パスで dead code 削除に伴いテスト数が 117→113 に変化——`docs/superpowers/plans/2026-07-05-suppify-code-simplification.md` 参照。）
 次にやること: `feat/cross-compile` を main へ統合する方針を user と確認（push/PR は承認必須）。
 
 ## symbol namespacing 実装の敵対的検証で発見・修正した5件
