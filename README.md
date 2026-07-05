@@ -157,19 +157,30 @@ exactly as written (`add(2, 3)`), whether from C, CRuby, or PicoRuby.
    ruby -r./ext/addlib/addlib -e 'p add(2, 3)'   # => 5
    ```
 
-5. Package it as a real, distributable gem — the same `gem build` any Ruby
-   native-extension gem uses:
+5. Add it to a consumer project's `Gemfile` as a Bundler `git:` source —
+   no `gem build` / `gem install` needed. Bundler's `git:` source builds
+   native extensions itself (`bundle install` runs `extconf.rb`/`make` for
+   you); a `path:` source does not, which is why `git:` is used here:
 
    ```sh
-   gem build addlib.gemspec
-   # => addlib-1.0.0.gem
+   (cd addlib && git init -q && git add -A && git commit -q -m "addlib")
    ```
 
-   `gem build` picks up the version from step 2's `--gem-version 1.0.0`,
-   producing `addlib-1.0.0.gem` — a normal RubyGems package (installable
-   with `gem install ./addlib-1.0.0.gem`) whose `extensions` field points
-   `mkmf` at `ext/addlib/extconf.rb`, so `ext/addlib` compiles at install
-   time on the installing machine, same as any other native-extension gem.
+   ```ruby
+   # consumer/Gemfile
+   source "https://rubygems.org"
+   gem "addlib", git: "#{__dir__}/../addlib"
+   ```
+
+   ```sh
+   cd consumer
+   bundle install
+   bundle exec ruby -e 'require "addlib"; p add(2, 3)'   # => 5
+   ```
+
+   `git: "#{__dir__}/../addlib"` is a local path here for demonstration —
+   any git remote (GitHub, a private server, ...) works the same way once
+   `addlib` is pushed there.
 
 ### picoruby target example
 
