@@ -6,5 +6,8 @@
 *.o
 *.a
 
+# generated example build output
+/examples/fib/*/build/
+
 # bundler local install
 /vendor/bundle/
