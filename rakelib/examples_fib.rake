@@ -54,5 +54,50 @@ namespace :examples do
         end
       end
     end
+
+    desc "Build the picoruby fib example (naive, then iter) and benchmark each against a plain interpreter"
+    task :picoruby do
+      root = File.expand_path("..", __dir__)
+      dir = File.join(root, "examples", "fib", "picoruby")
+      build_dir = File.join(dir, "build")
+      # CLI computes the picoruby gem tree at `<out_dir>/picoruby-<lib_name>` (see
+      # lib/suppify/cli.rb: `gem_dir = File.join(opts[:out_dir], "picoruby-#{opts[:lib_name]}")`),
+      # so passing `-d build_dir -o fib` lands the tree at `build_dir/picoruby-fib`.
+      gem_dir = File.join(build_dir, "picoruby-fib")
+
+      spinel_lib = ENV.fetch("SPINEL_LIB") { raise "SPINEL_LIB must be set (see README Requirements)" }
+      picoruby_root = ENV.fetch("PICORUBY_ROOT") { raise "PICORUBY_ROOT must be set" }
+
+      # See the :cruby task above for why the spawned subprocesses run
+      # outside this rake task's own bundle context.
+      Bundler.with_unbundled_env do
+        env = { "PATH" => ENV["PATH"].to_s, "SPINEL_LIB" => spinel_lib }
+
+        [["naive", "fib_naive"], ["iter", "fib_iter"]].each do |label, basename|
+          FileUtils.rm_rf(gem_dir)
+          FileUtils.mkdir_p(build_dir)
+
+          puts "== #{label}: generating with suppify =="
+          out, status = Open3.capture2e(env, "ruby", File.join(root, "suppify.rb"),
+                                         File.join(dir, "#{basename}.rb"), "-o", "fib", "-t", "picoruby",
+                                         "-d", build_dir)
+          raise "suppify failed for #{label}:\n#{out}" unless status.success?
+
+          mrb_build_dir = File.join(build_dir, "mrb-#{label}")
+          FileUtils.rm_rf(mrb_build_dir)
+          puts "== #{label}: building picoruby host =="
+          build_env = env.merge("MRUBY_CONFIG" => File.join(dir, "host.rb"), "MRUBY_BUILD_DIR" => mrb_build_dir)
+          out, status = Open3.capture2e(build_env, "rake", chdir: picoruby_root)
+          raise "picoruby host build failed for #{label}:\n#{out}" unless status.success?
+
+          puts "== #{label}: running benchmark =="
+          binary = File.join(mrb_build_dir, "host", "bin", "picoruby")
+          script = File.join(dir, "run_benchmark_#{label}.rb")
+          out, status = Open3.capture2e(env, binary, script)
+          puts out
+          raise "run_benchmark_#{label}.rb failed:\n#{out}" unless status.success?
+        end
+      end
+    end
   end
 end
