@@ -503,6 +503,11 @@ extension built with `mkmf` (`test/test_ruby_ext_integration.rb`) —
 useful as a template if you want to consume suppify's output from Ruby
 itself rather than a standalone C program.
 
+For runnable, repo-checked-in examples that embed a real generated
+cruby gem / picoruby mrbgem, demonstrate editing the source and
+recompiling, and benchmark the AOT-compiled result against a plain
+interpreter, see [`examples/`](examples/README.md).
+
 ## Development
 
 ```sh
