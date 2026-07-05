@@ -30,7 +30,9 @@ module Suppify
     # member name.
     RESERVED_LIB_NAMES = RuntimeSources::SOURCES.map { |s| File.basename(s, ".c") }.freeze
 
-    # Minimal arg parsing (optparse-free so it compiles under spinel too).
+    # Hand-rolled rather than OptionParser: flag_value! (below) must reject a
+    # flag's value when it's missing or looks like another flag, which plain
+    # OptionParser switches don't validate on their own.
     def parse(argv)
       input = nil
       lib_name = nil
@@ -75,9 +77,10 @@ module Suppify
       v
     end
 
-    def run(argv, tmp_dir: ".suppify-tmp")
+    def run(argv)
       opts = parse(argv)
       require "fileutils"
+      tmp_dir = ".suppify-tmp"
       FileUtils.mkdir_p(tmp_dir)
       ruby_source = File.read(opts[:input])
       c_path = File.join(tmp_dir, "#{opts[:lib_name]}.c")
