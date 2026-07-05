@@ -94,20 +94,185 @@ exactly as written (`add(2, 3)`), whether from C, CRuby, or PicoRuby.
 
 ### cruby target example
 
-```sh
-SPINEL_LIB=/path/to/spinel/lib ruby suppify.rb app.rb -o addlib -t cruby
-cd addlib && ruby ext/addlib/extconf.rb && make   # or: gem build addlib.gemspec
-ruby -r./ext/addlib/addlib -e 'p add(2, 3)'        # => 5
-```
+1. Write the Ruby source and its `.rbs` sidecar (the same `add`/`boom` example
+   used above):
+
+   ```ruby
+   # app.rb
+   def add(a, b) = a + b
+   def boom = raise "x"
+   ```
+
+   ```
+   # app.rbs
+   class Object
+     def add: (Integer, Integer) -> Integer
+     def boom: () -> void
+   end
+   ```
+
+2. Run `suppify` with `-t cruby`. `--gem-version` and `--license` are
+   optional and only matter for this target's `.gemspec` (the `c` target
+   ignores them entirely):
+
+   ```sh
+   SPINEL_LIB=/path/to/spinel/lib \
+     ruby suppify.rb app.rb -o addlib -t cruby --gem-version 1.0.0 --license MIT
+   ```
+
+   This leaves a buildable gem tree under `addlib/` (default `out_dir` is
+   `.`):
+
+   ```
+   addlib/
+     addlib.gemspec
+     lib/addlib.rb
+     ext/addlib/
+       extconf.rb
+       addlib.h
+       addlib_gen.c
+       binding.c
+       addlib_prelude.h
+       <spinel runtime sources, copied flat>
+   ```
+
+   Because `--license MIT` was passed, `addlib.gemspec` includes
+   `s.license = "MIT"`; omit the flag and that line is left out of the
+   gemspec entirely rather than guessing a license on your behalf.
+
+3. Build the native extension with the consumer's own Ruby toolchain
+   (`mkmf`) — ordinary extension building, nothing suppify-specific.
+   `extconf.rb` writes its `Makefile` and compiled output into the current
+   directory, so build from inside `ext/addlib` itself, not the gem root:
+
+   ```sh
+   cd addlib
+   (cd ext/addlib && ruby extconf.rb && make)
+   ```
+
+4. Require the built extension and call the exported method as an ordinary
+   Ruby method (still from `addlib/`):
+
+   ```sh
+   ruby -r./ext/addlib/addlib -e 'p add(2, 3)'   # => 5
+   ```
+
+5. Package it as a real, distributable gem — the same `gem build` any Ruby
+   native-extension gem uses:
+
+   ```sh
+   gem build addlib.gemspec
+   # => addlib-1.0.0.gem
+   ```
+
+   `gem build` picks up the version from step 2's `--gem-version 1.0.0`,
+   producing `addlib-1.0.0.gem` — a normal RubyGems package (installable
+   with `gem install ./addlib-1.0.0.gem`) whose `extensions` field points
+   `mkmf` at `ext/addlib/extconf.rb`, so `ext/addlib` compiles at install
+   time on the installing machine, same as any other native-extension gem.
 
 ### picoruby target example
 
-```sh
-SPINEL_LIB=/path/to/spinel/lib ruby suppify.rb app.rb -o addlib -t picoruby
-# then in the consumer's build_config/*.rb:
-#   conf.gem gemdir: "/abs/path/to/picoruby-addlib"
-# rebuild picoruby; `add(2, 3)` now runs as AOT-compiled native code.
-```
+1. Write the Ruby source and its `.rbs` sidecar (the same `add`/`boom`
+   example used above):
+
+   ```ruby
+   # app.rb
+   def add(a, b) = a + b
+   def boom = raise "x"
+   ```
+
+   ```
+   # app.rbs
+   class Object
+     def add: (Integer, Integer) -> Integer
+     def boom: () -> void
+   end
+   ```
+
+2. Run `suppify` with `-t picoruby -o addlib`. The emitted directory is
+   named `picoruby-addlib`, not `addlib`:
+
+   ```sh
+   SPINEL_LIB=/path/to/spinel/lib \
+     ruby suppify.rb app.rb -o addlib -t picoruby
+   ```
+
+   ```
+   picoruby-addlib/
+     mrbgem.rake
+     include/addlib.h        # public neutral header for consumer/firmware code
+     src/
+       addlib.h               # same header, quoted-include form for src/*.c
+       addlib_gen.c
+       binding.c
+       addlib_prelude.h
+       <spinel runtime sources, copied flat>
+   ```
+
+   `-o addlib` still names the exported C API (`add()`, `addlib_init()`,
+   `addlib_error()`, ...), but suppify defaults the mrbgem's own spec name
+   to `picoruby-<lib_name>` rather than reusing `lib_name` verbatim.
+   `picoruby-xxxx` is the real ecosystem convention for PicoRuby-specific
+   mrbgems — picoruby's own tree is full of them (`picoruby-gpio`,
+   `picoruby-json`, `picoruby-sqlite3`, ...), distinct from the much
+   smaller set of portable `mruby-xxxx` gems that also run under upstream
+   mruby (the compiler, `mrbc`, ...). That spec name is also where
+   picoruby's build derives the generated C init function's name from —
+   here, `mrb_picoruby_addlib_gem_init`.
+
+3. Embed it into a picoruby build via a `build_config` that points
+   `conf.gem gemdir:` at the emitted directory:
+
+   ```ruby
+   # host.rb -- a build_config for your picoruby checkout, not part of suppify's own output
+   MRuby::Build.new do |conf|
+     conf.toolchain :gcc
+     conf.cc.defines << "MRB_TICK_UNIT=4"
+     conf.cc.defines << "MRB_TIMESLICE_TICK_COUNT=3"
+     conf.cc.defines << "PICORB_ALLOC_ALIGN=8"
+     conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
+     conf.cc.defines << "PICORB_PLATFORM_POSIX"
+     conf.cc.defines << "MRB_INT64"
+     conf.cc.defines << "MRB_NO_BOXING"
+     conf.cc.defines << "MRB_UTF8_STRING"
+     conf.picoruby
+     conf.gembox "minimum"
+     conf.gem core: "picoruby-bin-picoruby"
+     conf.gem gemdir: "/abs/path/to/picoruby-addlib"
+   end
+   ```
+
+   Of these settings, only `conf.picoruby` is actually load-bearing for a
+   suppify-generated gem; the rest is picoruby's own standard POSIX
+   host-build boilerplate (see "Embedding an mrbgem..." below for why).
+
+4. Build picoruby against that config, with the picoruby checkout as the
+   working directory. Point `MRUBY_BUILD_DIR` at an **absolute path
+   outside the checkout** (e.g. a scratch/temp directory) — a relative
+   `MRUBY_BUILD_DIR=build` would write build artifacts straight into the
+   picoruby checkout's own working tree:
+
+   ```sh
+   cd /path/to/picoruby
+   MRUBY_CONFIG=/path/to/host.rb MRUBY_BUILD_DIR=/abs/path/to/scratch/build rake
+   ```
+
+   This compiles the mrbgem's `src/*.c` — suppify's generated TU, the
+   copied spinel runtime sources, and the mruby binding — straight into
+   the host build's `libmruby.a` alongside picoruby's own gems, producing
+   `<MRUBY_BUILD_DIR>/host/bin/picoruby`.
+
+5. Run a script against the resulting binary. `conf.gembox "minimum"`
+   already pulls in `picoruby-bin-picoruby` on POSIX, so the binary is a
+   script runner and `add` is callable as an ordinary top-level Ruby
+   method, AOT-compiled:
+
+   ```sh
+   echo 'print add(2, 3)' > prog.rb
+   /abs/path/to/scratch/build/host/bin/picoruby prog.rb
+   # => 5
+   ```
 
 ### Exported symbols = public top-level methods
 
@@ -175,6 +340,66 @@ renamed). It's stateless and identical across libraries, so this only
 happens if you link the raw `c`-target archives directly; the `cruby`/
 `picoruby` targets aren't affected. Pick distinct exported method names
 (`-o`/`def` names) across libraries either way, same as any C code.
+
+### Embedding an mrbgem in a PicoRuby application or firmware project
+
+Once a suppify-generated mrbgem (`picoruby-<lib_name>`) exists, adding it
+to your *own* picoruby-based app or firmware is the same
+`conf.gem gemdir: "/abs/or/config-relative/path/to/picoruby-<lib_name>"`
+line as the walkthrough above, just inside your project's own
+`build_config` instead of a throwaway `host.rb`. `gemdir:` paths resolve
+relative to the `build_config` file's own directory, not your terminal's
+working directory or the picoruby repo root, so an absolute path (as shown
+above) sidesteps that entirely.
+
+- **VM selection is a real, load-bearing requirement: `conf.picoruby`, not
+  `conf.femtoruby`.** suppify's generated mruby binding targets picoruby's
+  `PICORB_VM_MRUBY` VM (`mrb_state`, `mrb_value`, `mrb_get_args`,
+  `mrb_define_method`, ...) — that API only exists when the build_config
+  selects it via `conf.picoruby`. picoruby's other VM variant, selected by
+  `conf.femtoruby` (`PICORB_VM_MRUBYC`, the mruby/c VM), exposes a
+  different, incompatible API; a suppify-generated mrbgem won't compile
+  against it.
+- **Most of the other defines in the walkthrough's `build_config` are not
+  suppify requirements** — they're picoruby's own standard POSIX host
+  recipe (the same set `build_config/default.rb` uses), and three of them
+  (`MRB_INT64`, `MRB_NO_BOXING`, `MRB_UTF8_STRING`) get forced on
+  unconditionally by picoruby's own `picoruby-mruby` gem regardless of
+  what your build_config sets. Don't feel obliged to copy that whole list
+  into a firmware build_config on suppify's account — only
+  `conf.picoruby` matters to a suppify-generated gem; your target's own
+  build_config (POSIX host, an MCU cross build, ...) already sets
+  whatever it needs for its own gems.
+- **`spec.license` / `spec.author` are hard requirements of picoruby's own
+  gem loader, not a suppify convention.**
+  `MRuby::Gem::Specification#setup` fails the entire build if a gem's
+  `mrbgem.rake` omits either — this is why the emitted `mrbgem.rake`
+  always sets `spec.author = 'suppify'` and why suppify's CLI defaults
+  `--license` to `MIT` for this target even if you don't pass one. If you
+  hand-edit a generated `mrbgem.rake`, keep both fields.
+- **Two suppify mrbgems must use different `-o lib_name` values, for a
+  second, independent reason beyond symbol namespacing.** picoruby derives
+  each mrbgem's generated init/final C function name directly from its
+  gem name, and only deduplicates loaded gems by directory, not by
+  declared name — two gem directories that resolve to the same
+  `picoruby-<lib_name>` produce a duplicate C function definition and a
+  hard compile/link error, independent of and in addition to the
+  runtime-symbol-prefix collision covered above.
+- **Flash/code-size footprint: each suppify mrbgem bundles and namespaces
+  its own copy of spinel's runtime sources, not a shared one.** Embedding
+  several suppify-generated mrbgems into one firmware image compiles and
+  links the spinel runtime once *per gem*, not once total — size
+  budgeting on a flash-constrained target should account for N runtime
+  copies when combining N suppify mrbgems, not one.
+- **Cross-compilation toolchain flags come entirely from your own
+  build_config.** The emitted `mrbgem.rake` never sets `conf.cc.command`,
+  target ABI flags (`-mcpu`, `-mthumb`, ...), or any toolchain selection —
+  it only adds its own include path, the runtime-symbol-prefix include,
+  and `-lm` (`spec.cc.include_paths`, `spec.cc.flags`,
+  `spec.linker.libraries`). Whichever toolchain your build_config already
+  targets (`arm-none-eabi-gcc` for a Cortex-M board, host `gcc`/`clang`
+  for POSIX, etc.) compiles the mrbgem's sources too, same as noted in
+  [Cross-compilation](#cross-compilation) below.
 
 ### Cross-compilation
 
