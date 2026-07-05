@@ -245,8 +245,10 @@ end
 - [ ] **Step 6: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `117 tests, ... 0 failures, 0 errors` (same 117 as before — this is a
-behavior-preserving refactor, no test count change).
+Expected: `116 tests, ... 0 failures, 0 errors` (117 minus 1 — deleting
+`kind_for` also deletes its dedicated test method, `test_kind` in
+`test/test_symbol_map.rb`; the other test edit only removes an assertion
+line inside an existing method, so it doesn't change the count).
 
 - [ ] **Step 7: Commit**
 
@@ -352,10 +354,10 @@ require "suppify/cli"
 - [ ] **Step 4: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests` (117 minus the deleted `test_json_parser.rb`'s test
-cases), `0 failures, 0 errors`. `test/test_symbol_map.rb`'s two tests (which
-exercise `SymbolMap.from_json`, now backed by `JSON.parse`) must still pass
-unchanged.
+Expected: `113 tests` (116 after Task 1, minus 3 — `test_json_parser.rb` has
+three test methods, all deleted along with the file), `0 failures, 0 errors`.
+`test/test_symbol_map.rb`'s two tests (which exercise `SymbolMap.from_json`,
+now backed by `JSON.parse`) must still pass unchanged.
 
 - [ ] **Step 5: Commit**
 
@@ -446,7 +448,7 @@ grouped or not (e.g. `"const char *a0;"` either way).
 - [ ] **Step 3: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests, 0 failures, 0 errors`.
+Expected: `113 tests, 0 failures, 0 errors`.
 
 - [ ] **Step 4: Commit**
 
@@ -638,7 +640,7 @@ Replace with:
 - [ ] **Step 6: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests, 0 failures, 0 errors`.
+Expected: `113 tests, 0 failures, 0 errors`.
 
 - [ ] **Step 7: Commit**
 
@@ -700,7 +702,7 @@ Then delete the `default_lib` method entirely:
 - [ ] **Step 2: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests, 0 failures, 0 errors`. `test/test_builder.rb` always
+Expected: `113 tests, 0 failures, 0 errors`. `test/test_builder.rb` always
 passes `spinel_lib:` explicitly, so this default-value path isn't covered by
 (and can't break) any existing test.
 
@@ -965,7 +967,7 @@ Replace with:
 - [ ] **Step 5: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests, 0 failures, 0 errors`.
+Expected: `113 tests, 0 failures, 0 errors`.
 
 - [ ] **Step 6: Commit**
 
@@ -1063,7 +1065,7 @@ since `lib/suppify.rb`'s own require list ends with `require "suppify/cli"`.)
 - [ ] **Step 4: Run the full test suite**
 
 Run: `bundle exec rake test`
-Expected: `116 tests, 0 failures, 0 errors`. No test anywhere calls
+Expected: `113 tests, 0 failures, 0 errors`. No test anywhere calls
 `Suppify::CLI.run` with a `tmp_dir:` argument (confirmed by grep across
 `lib/`, `test/`, and `suppify.rb`), so this is unaffected.
 
@@ -1131,9 +1133,10 @@ export PICORUBY_ROOT=~/dev/src/github.com/picoruby/picoruby
 bundle exec rake test
 ```
 
-Expected: `116 tests, ... 0 failures, 0 errors` (117 minus the deleted
-`test_json_parser.rb` test cases), same omission count as before (environment-
-gated integration tests, unaffected by this refactor).
+Expected: `113 tests, ... 0 failures, 0 errors` (117 minus 1 for Task 1's
+deleted `test_kind`, minus 3 for Task 2's deleted `test_json_parser.rb`
+methods), same omission count as before (environment-gated integration
+tests, unaffected by this refactor).
 
 - [ ] Confirm the working tree is clean and every change landed as its own
   commit:
