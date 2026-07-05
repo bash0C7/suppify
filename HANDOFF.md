@@ -1,8 +1,9 @@
 # HANDOFF — suppify
 
 状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も2ラウンドの fresh-context 敵対的検証にかけて計5件の実バグを発見・修正済み**。
-worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**113 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 113 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。（コード簡素化パスで dead code 削除に伴いテスト数が 117→113 に変化——`docs/superpowers/plans/2026-07-05-suppify-code-simplification.md` 参照。）
-次にやること: `feat/cross-compile` を main へ統合する方針を user と確認（push/PR は承認必須）。
+worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**118 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 118 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。（コード簡素化パスで dead code 削除に伴い 117→113 に変化した後、spinel 再ピン検証ヘルパーのテスト5件が増えて 118——`docs/superpowers/plans/2026-07-05-suppify-code-simplification.md`・`docs/superpowers/plans/2026-07-05-suppify-spinel-repin-bundler-workflow.md` 参照。）
+本 branch はコード簡素化パス（"Plan 2 不要" 判断）まで main に統合済み。その後さらに「spinel.pin + `rake spinel:check_pin`（再ピン検証の継続的な繰り返し）」と「README cruby 例を Bundler `git:` source workflow へ移行（`gem` コマンド不使用化）」を追加済み（下記セクション参照）。
+次にやること: `rake spinel:check_pin` の実クローン+ビルド検証は外部未検証コードの実行にあたりサンドボックス上 user 承認が必要（未実施）。それ以外はテスト green、本 branch を main へ統合する方針を user と確認（push/PR は承認必須）。
 
 ## symbol namespacing 実装の敵対的検証で発見・修正した5件
 
@@ -30,6 +31,14 @@ worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**113 
 （`docs/superpowers/specs/2026-07-05-suppify-code-simplification-design.md`）。
 `docs/superpowers/plans/2026-06-21-suppify-core.md` 自体は Plan 1 の完了済み
 計画書として履歴のまま残す。
+
+## spinel 再ピン検証の継続化 + Bundler-only cruby workflow
+
+（`docs/superpowers/specs/2026-07-05-suppify-spinel-repin-bundler-workflow-design.md`）
+
+- `spinel.pin`: 動作確認済みの spinel commit を1行で記録（初期値 `9394f6e0da417d40afc876fae83413d159aff11d`）。
+- `rake spinel:check_pin[ref]`（`rakelib/spinel.rake`）: 任意の spinel ref を clone・ビルドし、この repo のテストスイート丸ごとを against で走らせ、`Suppify::RuntimeSources::SOURCES` と spinel の `Makefile` `RT_MEMBERS` を diff する。`spinel.pin` の書き換えは行わない（人間が判断）。`rake test`（default task）には含めない — 外部リポジトリの未検証コードを clone/ビルドする操作のためサンドボックス上 user 承認が必要（このセッションでは2度試みて2度とも拒否され、未実行のまま）。
+- README の cruby ターゲット例: 最終ステップを `gem build`/`gem install` から Bundler `git:` source workflow（`bundle install` だけで native extension が自動ビルドされる。`path:` source では自動ビルドされない）に置換。実機で通しの動作確認済み（`add(2,3)==5`）。
 
 ## このリポジトリは何か
 
