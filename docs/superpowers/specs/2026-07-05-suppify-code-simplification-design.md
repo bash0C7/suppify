@@ -53,7 +53,7 @@ introduce new abstractions (e.g. no shared "runner" class to de-duplicate
 | `lib/suppify/emitter/picoruby_gem.rb` | Drop the unused `gem_name:` keyword argument; hardcode `gem_name = "picoruby-#{lib_name}"`. |
 | `lib/suppify/builder.rb` | Delete `default_lib` (a one-line wrapper returning `""`); inline as `ENV["SPINEL_LIB"].to_s` (`cli.rb` already uses this exact idiom elsewhere in the same codebase). |
 | `lib/suppify/cli.rb` | Drop `CLI.run`'s unused `tmp_dir:` keyword argument; hardcode `".suppify-tmp"` as a local. |
-| `lib/suppify.rb` | Delete the redundant `require "suppify/cli"` (already transitively loaded by `require "suppify"` itself). |
+| `suppify.rb` (repo-root entrypoint, distinct from `lib/suppify.rb`) | Delete the redundant `require "suppify/cli"` (already transitively loaded by `require "suppify"` itself). |
 
 ### Comment pruning (new, per user request this round)
 
