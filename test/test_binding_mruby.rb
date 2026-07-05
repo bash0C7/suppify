@@ -29,7 +29,7 @@ class TestBindingMruby < Test::Unit::TestCase
   end
 
   def test_int_wrapper_uses_get_args_and_fixnum_return
-    assert_match(/mrb_int a0, a1;/, @c)
+    assert_match(/mrb_int a0; mrb_int a1;/, @c)
     assert_match(/mrb_get_args\(mrb, "ii", &a0, &a1\);/, @c)
     assert_match(/add\(\(intptr_t\)a0, \(intptr_t\)a1\)/, @c)
     assert_match(/return mrb_fixnum_value\(\(mrb_int\)r\);/, @c)

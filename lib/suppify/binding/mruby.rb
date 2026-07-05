@@ -72,18 +72,14 @@ module Suppify
         b
       end
 
-      # C declarations for the get_args locals, grouped by type in first-seen
-      # order: "mrb_int a0, a1;" for values, "const char *a0, *a1;" for pointers.
+      # C declarations for the get_args locals, one per parameter. A pointer
+      # type (e.g. "const char *") already ends in "*", so no extra space is
+      # inserted before the variable name; other types get a separating space.
       def decls(kinds)
-        groups = {} # type => [indices]
-        kinds.each_with_index { |k, i| (groups[GET[k][:type]] ||= []) << i }
-        groups.map do |type, idxs|
-          if type.end_with?("*")
-            base = type.sub(/\s*\*+\s*\z/, "") # "const char *" -> "const char"
-            "#{base} #{idxs.map { |i| "*a#{i}" }.join(', ')};"
-          else
-            "#{type} #{idxs.map { |i| "a#{i}" }.join(', ')};"
-          end
+        kinds.each_index.map do |i|
+          type = GET[kinds[i]][:type]
+          sep = type.end_with?("*") ? "" : " "
+          "#{type}#{sep}a#{i};"
         end.join(" ")
       end
 
