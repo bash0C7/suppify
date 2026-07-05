@@ -8,7 +8,6 @@ module Suppify
       "double"        => "double",
       "mrb_float"     => "double",
       "const char *"  => "const char *",
-      "char *"        => "char *",
       "bool"          => "int",
       "_Bool"         => "int",
       "mrb_bool"      => "int",
@@ -22,20 +21,12 @@ module Suppify
       TABLE[key] or raise NonNeutralType, "non-neutral C type: #{c_type.inspect}"
     end
 
-    def neutral?(c_type)
-      map(c_type)
-      true
-    rescue NonNeutralType
-      false
-    end
-
     # Classifies a C type into a marshalling category the language bindings
     # switch on. Raises (via map) on non-neutral types.
     KIND = {
       "intptr_t"     => :int,
       "double"       => :float,
       "const char *" => :string,
-      "char *"       => :string,
       "int"          => :bool,
       "void"         => :void,
     }.freeze

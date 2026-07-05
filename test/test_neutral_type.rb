@@ -44,7 +44,6 @@ class TestNeutralType < Test::Unit::TestCase
     assert_equal :float,  Suppify::NeutralType.kind("mrb_float")
     assert_equal :float,  Suppify::NeutralType.kind("double")
     assert_equal :string, Suppify::NeutralType.kind("const char *")
-    assert_equal :string, Suppify::NeutralType.kind("char *")
     assert_equal :bool,   Suppify::NeutralType.kind("mrb_bool")
     assert_equal :bool,   Suppify::NeutralType.kind("bool")
     assert_equal :void,   Suppify::NeutralType.kind("void")

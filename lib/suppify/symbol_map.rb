@@ -17,10 +17,5 @@ module Suppify
       e = @by_ruby[ruby_name]
       e && e["c"]
     end
-
-    def kind_for(ruby_name)
-      e = @by_ruby[ruby_name]
-      e && e["kind"]
-    end
   end
 end

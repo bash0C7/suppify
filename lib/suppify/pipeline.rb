@@ -28,9 +28,6 @@ module Suppify
         cname = @symbols.cname_for(ruby_name)
         next nil unless cname # public method spinel did not emit (e.g. unused) — skip
         sig = SignatureExtractor.extract(@c_source, cname)
-        # Force neutral-type validation now so a non-neutral public method errors.
-        NeutralType.map(sig.return_type)
-        sig.params.each { |t, _| NeutralType.map(t) }
         { "public" => ruby_name, "cname" => cname, "sig" => sig }
       end.compact
     end

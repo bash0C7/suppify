@@ -17,8 +17,4 @@ class TestSymbolMap < Test::Unit::TestCase
   def test_unknown_returns_nil
     assert_nil @map.cname_for("missing")
   end
-
-  def test_kind
-    assert_equal "toplevel", @map.kind_for("add")
-  end
 end
