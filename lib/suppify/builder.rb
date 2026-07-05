@@ -1,4 +1,5 @@
 # lib/suppify/builder.rb
+require "open3"
 require "fileutils"
 require "suppify/runtime_sources"
 require "suppify/symbol_prefix"
@@ -35,24 +36,25 @@ module Suppify
       objs = sources.map { |src| compile(src, runtime_dir, prelude_path) }
 
       archive = File.join(out_dir, "lib#{lib_name}.a")
-      run! "ar rcs #{archive} #{objs.join(' ')}"
+      run! ["ar", "rcs", archive, *objs]
       { archive: archive }
     end
 
     def compile(src, runtime_dir, prelude_path)
       o_path = src.sub(/\.c\z/, ".o")
-      run! "cc -c #{src} -I#{runtime_dir} -include #{prelude_path} -o #{o_path}"
+      run! ["cc", "-c", src, "-I#{runtime_dir}", "-include", prelude_path, "-o", o_path]
       o_path
     end
 
-    def run!(cmd)
-      out, status = @runner.call(cmd)
-      raise Error, "command failed (#{status}): #{cmd}\n#{out}" unless status == 0
+    def run!(argv)
+      out, status = @runner.call(argv)
+      raise Error, "command failed (#{status}): #{argv.join(' ')}\n#{out}" unless status == 0
     end
 
-    def shell(cmd)
-      out = `#{cmd} 2>&1`
-      [out, $?.exitstatus]
+    # Default runner: array-form argv, no shell involved.
+    def shell(argv)
+      out, status = Open3.capture2e(*argv)
+      [out, status.exitstatus]
     end
   end
 end

@@ -18,7 +18,7 @@ class TestBuilder < Test::Unit::TestCase
       FileUtils.mkdir_p(out_dir)
 
       cmds = []
-      fake_runner = ->(cmd) { cmds << cmd; ["", 0] }
+      fake_runner = ->(argv) { cmds << argv; ["", 0] }
       fake_discover = ->(lib) { lib == "/opt/spinel/lib" ? %w[sp_gc_alloc] : raise("wrong lib") }
       fake_copy_runtime = lambda do |_lib, dest|
         FileUtils.mkdir_p(dest)
@@ -35,12 +35,12 @@ class TestBuilder < Test::Unit::TestCase
       assert_match(/#define sp_gc_alloc mylib_sp_gc_alloc/, File.read(prelude_path))
 
       runtime_c = File.join(dir, "mylib_runtime", "sp_gc.c")
-      cc_cmds = cmds.select { |c| c.start_with?("cc ") }
-      assert cc_cmds.any? { |c| c.include?(c_path) && c.include?("-include #{prelude_path}") }
-      assert cc_cmds.any? { |c| c.include?(runtime_c) && c.include?("-include #{prelude_path}") }
+      cc_cmds = cmds.select { |c| c.first == "cc" }
+      assert cc_cmds.any? { |c| c.include?(c_path) && c.include?("-include") && c.include?(prelude_path) }
+      assert cc_cmds.any? { |c| c.include?(runtime_c) && c.include?("-include") && c.include?(prelude_path) }
 
-      ar_cmd = cmds.find { |c| c.start_with?("ar ") }
-      assert_match(%r{ar rcs #{out_dir}/libmylib\.a}, ar_cmd)
+      ar_cmd = cmds.find { |c| c.first == "ar" }
+      assert_equal File.join(out_dir, "libmylib.a"), ar_cmd[2]
       assert ar_cmd.include?(c_path.sub(/\.c\z/, ".o"))
       assert ar_cmd.include?(runtime_c.sub(/\.c\z/, ".o"))
       assert_equal File.join(out_dir, "libmylib.a"), out[:archive]
@@ -48,7 +48,7 @@ class TestBuilder < Test::Unit::TestCase
   end
 
   def test_cc_failure_raises
-    fake = ->(_cmd) { ["err", 1] }
+    fake = ->(_argv) { ["err", 1] }
     discover = ->(_lib) { [] }
     copy_runtime = lambda do |_lib, dest|
       FileUtils.mkdir_p(dest)

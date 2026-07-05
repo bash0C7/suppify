@@ -9,34 +9,34 @@ class TestSpinelRunner < Test::Unit::TestCase
   # SpinelRunner must therefore issue two separate invocations.
   def test_builds_two_commands_and_returns_paths
     captured = []
-    fake = ->(cmd) { captured << cmd; ["", 0] }
+    fake = ->(argv) { captured << argv; ["", 0] }
     r = Suppify::SpinelRunner.new(spinel_bin: "/opt/spinel", runner: fake)
     out = r.emit("/work/app.rb", "/tmp/app.c")
-    assert_match(%r{\A/opt/spinel /work/app\.rb -c -o /tmp/app\.c\z}, captured[0])
-    assert_match(%r{\A/opt/spinel /work/app\.rb --emit-symbol-map -o /tmp/app\.symbols\.json\z}, captured[1])
+    assert_equal ["/opt/spinel", "/work/app.rb", "-c", "-o", "/tmp/app.c"], captured[0]
+    assert_equal ["/opt/spinel", "/work/app.rb", "--emit-symbol-map", "-o", "/tmp/app.symbols.json"], captured[1]
     assert_equal "/tmp/app.c", out[:c_path]
     assert_equal "/tmp/app.symbols.json", out[:symbols_path]
   end
 
   def test_nonzero_status_raises_on_c_step
-    fake = ->(_cmd) { ["boom", 1] }
+    fake = ->(_argv) { ["boom", 1] }
     r = Suppify::SpinelRunner.new(spinel_bin: "spinel", runner: fake)
     assert_raise(Suppify::Error) { r.emit("/work/app.rb", "/tmp/app.c") }
   end
 
   def test_nonzero_status_raises_on_symbol_map_step
     calls = 0
-    fake = ->(_cmd) { calls += 1; calls == 1 ? ["", 0] : ["boom", 1] }
+    fake = ->(_argv) { calls += 1; calls == 1 ? ["", 0] : ["boom", 1] }
     r = Suppify::SpinelRunner.new(spinel_bin: "spinel", runner: fake)
     assert_raise(Suppify::Error) { r.emit("/work/app.rb", "/tmp/app.c") }
   end
 
   def test_includes_rbs_flag_on_c_step_only_when_given
     captured = []
-    fake = ->(cmd) { captured << cmd; ["", 0] }
+    fake = ->(argv) { captured << argv; ["", 0] }
     r = Suppify::SpinelRunner.new(spinel_bin: "spinel", runner: fake, rbs_dir: "/work/sigs")
     r.emit("/work/app.rb", "/tmp/app.c")
-    assert_match(%r{\Aspinel /work/app\.rb --rbs /work/sigs -c -o /tmp/app\.c\z}, captured[0])
-    assert_match(%r{\Aspinel /work/app\.rb --emit-symbol-map -o /tmp/app\.symbols\.json\z}, captured[1])
+    assert_equal ["spinel", "/work/app.rb", "--rbs", "/work/sigs", "-c", "-o", "/tmp/app.c"], captured[0]
+    assert_equal ["spinel", "/work/app.rb", "--emit-symbol-map", "-o", "/tmp/app.symbols.json"], captured[1]
   end
 end
