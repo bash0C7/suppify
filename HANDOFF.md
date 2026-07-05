@@ -21,6 +21,16 @@ worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**117 
 
 **注記**: main には Plan 1（コア: spinel→中立 C `.a`+ヘッダ、CRuby ネイティブ拡張から呼べることまで実証）がマージ済み。本 branch はその上に「ターゲットエミッタ層」＋「複数ライブラリ同居対応」を足したもの。
 
+## Plan 2（自己ホスト化）は不要と判断
+
+`docs/superpowers/plans/2026-06-21-suppify-core.md` に記載されていた、suppify
+自身をいずれ spinel でコンパイルするという未着手の構想（Plan 2）は不要と判断
+された。これを見越して書かれていた投機的コード（自前 JSON パーサ、backtick
+シェル実行、CLI の誤った根拠コメント）は簡素化パスで削除済み
+（`docs/superpowers/specs/2026-07-05-suppify-code-simplification-design.md`）。
+`docs/superpowers/plans/2026-06-21-suppify-core.md` 自体は Plan 1 の完了済み
+計画書として履歴のまま残す。
+
 ## このリポジトリは何か
 
 `suppify` = spinel でコンパイルした Ruby を、どこからでも呼べる中立 C ライブラリへ変換する外部ツール。spinel 本体は無改変。正本ドキュメント:
