@@ -23,7 +23,7 @@ class TestBuilder < Test::Unit::TestCase
       fake_copy_runtime = lambda do |_lib, dest|
         FileUtils.mkdir_p(dest)
         FileUtils.touch(File.join(dest, "sp_gc.c"))
-        { sources: ["sp_gc.c"], headers: [] }
+        { sources: ["sp_gc.c"] }
       end
 
       b = Suppify::Builder.new(spinel_lib: "/opt/spinel/lib", runner: fake_runner,
@@ -52,7 +52,7 @@ class TestBuilder < Test::Unit::TestCase
     discover = ->(_lib) { [] }
     copy_runtime = lambda do |_lib, dest|
       FileUtils.mkdir_p(dest)
-      { sources: [], headers: [] }
+      { sources: [] }
     end
     b = Suppify::Builder.new(spinel_lib: "/l", runner: fake, discover_symbols: discover, copy_runtime: copy_runtime)
     Dir.mktmpdir do |dir|

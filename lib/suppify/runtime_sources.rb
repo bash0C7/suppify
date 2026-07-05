@@ -31,12 +31,10 @@ module Suppify
         FileUtils.cp(src, File.join(dest_dir, base))
         base
       end
-      headers = header_paths(lib_dir).map do |src|
-        base = File.basename(src)
-        FileUtils.cp(src, File.join(dest_dir, base))
-        base
+      header_paths(lib_dir).each do |src|
+        FileUtils.cp(src, File.join(dest_dir, File.basename(src)))
       end
-      { sources: sources, headers: headers }
+      { sources: sources }
     end
 
     def header_paths(lib_dir)

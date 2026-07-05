@@ -30,8 +30,6 @@ class TestRuntimeSources < Test::Unit::TestCase
 
       assert_includes result[:sources], "sp_gc.c"
       assert_includes result[:sources], "re_compile.c" # flattened, no regexp/ prefix
-      assert_includes result[:headers], "sp_runtime.h"
-      assert_includes result[:headers], "re_internal.h"
       assert File.exist?(File.join(dest, "sp_gc.c"))
       assert File.exist?(File.join(dest, "re_compile.c"))
       assert File.exist?(File.join(dest, "sp_runtime.h"))

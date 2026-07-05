@@ -32,8 +32,6 @@ module Suppify
         File.write(File.join(ext, "extconf.rb"), extconf(lib_name))
         File.write(File.join(lib, "#{lib_name}.rb"), %(require "#{lib_name}/#{lib_name}"\n))
         File.write(File.join(out_dir, "#{lib_name}.gemspec"), gemspec(lib_name, version, license))
-
-        { gemspec: File.join(out_dir, "#{lib_name}.gemspec"), ext_dir: ext }
       end
 
       def extconf(lib_name)

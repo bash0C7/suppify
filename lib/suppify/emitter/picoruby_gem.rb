@@ -15,10 +15,10 @@ module Suppify
     module PicoRubyGem
       module_function
 
-      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:, gem_name: nil,
+      def emit(lib_name:, c_source:, header:, exports:, spinel_lib:, out_dir:,
                discover_symbols: SymbolPrefix.method(:discover_runtime_symbols),
                version: "0.1.0", license: "MIT")
-        gem_name ||= "picoruby-#{lib_name}"
+        gem_name = "picoruby-#{lib_name}"
         init_func = "mrb_#{gem_name.tr('-', '_')}_gem_init"
         src = File.join(out_dir, "src")
         inc = File.join(out_dir, "include")
@@ -35,7 +35,6 @@ module Suppify
         File.write(File.join(src, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
 
         File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name, lib_name, version, license))
-        { gem_dir: out_dir, gem_name: gem_name, init_func: init_func }
       end
 
       # version/license are consumer-controlled: a placeholder version is
