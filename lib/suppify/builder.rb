@@ -12,7 +12,7 @@ module Suppify
   # suppify-built libraries linked into the same binary would collide on
   # spinel's shared runtime state.
   class Builder
-    def initialize(spinel_lib: ENV["SPINEL_LIB"] || default_lib,
+    def initialize(spinel_lib: ENV["SPINEL_LIB"].to_s,
                    runner: method(:shell),
                    discover_symbols: SymbolPrefix.method(:discover_runtime_symbols),
                    copy_runtime: RuntimeSources.method(:copy_flat))
@@ -53,10 +53,6 @@ module Suppify
     def shell(cmd)
       out = `#{cmd} 2>&1`
       [out, $?.exitstatus]
-    end
-
-    def default_lib
-      ""
     end
   end
 end
