@@ -5,7 +5,6 @@ module Suppify
 end
 require "suppify/neutral_type"
 require "suppify/signature"
-require "suppify/json_parser"
 require "suppify/symbol_map"
 require "suppify/visibility"
 require "suppify/trampoline"

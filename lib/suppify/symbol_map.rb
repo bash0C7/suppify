@@ -1,10 +1,10 @@
 # lib/suppify/symbol_map.rb
-require "suppify/json_parser"
+require "json"
 
 module Suppify
   class SymbolMap
     def self.from_json(str)
-      data = JSONParser.parse(str)
+      data = JSON.parse(str)
       new(data["symbols"] || [])
     end
 
