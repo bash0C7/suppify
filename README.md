@@ -76,7 +76,7 @@ result is packaged.
 | Target | Output | Consumed by |
 |---|---|---|
 | `c` (default) | self-contained `liblibname.a` + neutral `libname.h`, **compiled here** with the host `cc`/`ar` | any C program, linked directly (see [Example](#example)) |
-| `cruby` | a buildable **CRuby native-extension gem** (`ext/.../extconf.rb` + `*.gemspec`) under `out_dir/libname` | CRuby, via `gem build` / `require` — the AOT-compiled methods become ordinary Ruby methods |
+| `cruby` | a buildable **CRuby native-extension gem** (`ext/.../extconf.rb` + `*.gemspec`) under `out_dir/libname` | CRuby, via a Bundler `git:` source — the AOT-compiled methods become ordinary Ruby methods |
 | `picoruby` | a buildable **PicoRuby mrbgem** (`mrbgem.rake` + `src/`) under `out_dir/picoruby-libname` | PicoRuby, via `conf.gem gemdir:` in a build_config |
 
 The `cruby` and `picoruby` targets require `SPINEL_LIB` to be set (they
@@ -160,10 +160,13 @@ exactly as written (`add(2, 3)`), whether from C, CRuby, or PicoRuby.
 5. Add it to a consumer project's `Gemfile` as a Bundler `git:` source —
    no `gem build` / `gem install` needed. Bundler's `git:` source builds
    native extensions itself (`bundle install` runs `extconf.rb`/`make` for
-   you); a `path:` source does not, which is why `git:` is used here:
+   you); a `path:` source does not, which is why `git:` is used here.
+   Still inside `addlib/` from step 4, turn it into a git repo, then step
+   back out to create a sibling `consumer/` directory:
 
    ```sh
-   (cd addlib && git init -q && git add -A && git commit -q -m "addlib")
+   git init -q && git add -A && git commit -q -m "addlib"
+   cd .. && mkdir consumer && cd consumer
    ```
 
    ```ruby
@@ -173,7 +176,6 @@ exactly as written (`add(2, 3)`), whether from C, CRuby, or PicoRuby.
    ```
 
    ```sh
-   cd consumer
    bundle install
    bundle exec ruby -e 'require "addlib"; p add(2, 3)'   # => 5
    ```
