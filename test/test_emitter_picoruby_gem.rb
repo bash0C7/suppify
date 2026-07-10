@@ -146,7 +146,22 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       assert_match(/#if defined\(PICORB_VM_MRUBYC\)/, binding)
       assert_match(/#include <mrubyc\.h>/, binding)
       assert_match(/mrbc_define_method\(0, 0, "add", c_suppi_add\)/, binding)
+      assert_match(/void mrbc_addlib_init\(mrbc_vm \*vm\)/, binding)
       assert_match(/#else/, binding)
+    end
+  end
+
+  # picoruby-require's collect_gems only puts a gem into the mrubyc
+  # prebuilt_gems[] require table if the gem has mrblib/*.rb to compile into
+  # the table's bytecode entry -- a gem without mrblib is silently skipped
+  # and its mrbc_<lib>_init never runs (methods then NoMethodError on
+  # device). The stub is load-bearing even though it defines nothing.
+  def test_emits_mrblib_stub_so_picogem_table_includes_the_gem
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      stub = File.join(out, "mrblib", "addlib.rb")
+      assert File.exist?(stub), "expected mrblib/addlib.rb stub"
+      assert_match(/mrbc_addlib_init/, File.read(stub))
     end
   end
 end

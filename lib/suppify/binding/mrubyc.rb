@@ -98,20 +98,32 @@ module Suppify
         end
       end
 
-      # mrb_state degrades to `void` under PICORB_VM_MRUBYC (see
-      # picoruby-mrubyc's own mruby.h compatibility shim) -- the param
-      # exists only to match the aggregate gem lifecycle hook signature
-      # every picoruby mrbgem's generated glue calls unconditionally.
+      # The registration entry that actually runs on mrubyc firmware:
+      # picoruby-require's generated prebuilt_gems[] table maps
+      # `require '<lib>'` to `mrbc_<lib>_init(mrbc_vm *vm)` (name derived
+      # from the gem dir name by its collect_gems task) and then loads the
+      # gem's mrblib bytecode. Registration targets Object via
+      # mrbc_define_method(0, 0, ...) -- same convention as
+      # picoruby-mrubyc's own rrt0.c -- so vm is unused.
+      #
+      # mrb_<gem>_gem_init stays defined (delegating) because the
+      # mruby-style aggregate gem_init.c in the build tree references it;
+      # that object is not pulled into mrubyc firmware links today, but a
+      # build that does link it must not hit an undefined symbol. mrb_state
+      # degrades to `void` under PICORB_VM_MRUBYC (see the mruby.h
+      # compatibility shim note in render).
       def gem_init(lib_name, init_func, exports)
+        mrbc_init = "mrbc_#{lib_name.tr('-', '_')}_init"
         final_func = init_func.sub(/_gem_init\z/, "_gem_final")
-        b = +"void #{init_func}(mrb_state *mrb) {\n"
-        b << "    (void)mrb;\n"
+        b = +"void #{mrbc_init}(mrbc_vm *vm) {\n"
+        b << "    (void)vm;\n"
         b << "    #{lib_name}_init();\n"
         exports.each do |e|
           n = e["public"]
           b << "    mrbc_define_method(0, 0, \"#{n}\", c_suppi_#{n});\n"
         end
         b << "}\n\n"
+        b << "void #{init_func}(mrb_state *mrb) { (void)mrb; #{mrbc_init}(0); }\n\n"
         b << "void #{final_func}(mrb_state *mrb) { (void)mrb; }\n"
         b
       end

@@ -90,11 +90,23 @@ class TestBindingMrubyc < Test::Unit::TestCase
     assert_match(/if \(addlib_error\(\)\) \{ mrbc_raise\(vm, MRBC_CLASS\(RuntimeError\), addlib_error_message\(\)\); return; \}/, @c)
   end
 
-  def test_gem_init_matches_lifecycle_hook_signature_and_registers_on_object
-    assert_match(/void mrb_picoruby_addlib_gem_init\(mrb_state \*mrb\) \{/, @c)
-    assert_match(/addlib_init\(\);/, @c)
-    assert_match(/mrbc_define_method\(0, 0, "add", c_suppi_add\);/, @c)
-    assert_match(/mrbc_define_method\(0, 0, "boom", c_suppi_boom\);/, @c)
+  # On mrubyc firmware the ONLY registration path that actually runs is
+  # picoruby-require's prebuilt_gems[] table: `require '<lib>'` calls
+  # `mrbc_<lib>_init(mrbc_vm *vm)` (name derived by picoruby-require's
+  # collect_gems from the gem dir name) and then loads the gem's mrblib
+  # bytecode. The mruby-style aggregate gem_init.c exists in the build tree
+  # but its object is never pulled out of libmruby.a by the mrubyc firmware
+  # link, so registrations living only in mrb_*_gem_init never execute.
+  def test_defines_mrbc_init_as_picogem_initializer_registering_on_object
+    init = @c[/void mrbc_addlib_init\(mrbc_vm \*vm\) \{.*?\n\}/m]
+    assert_not_nil init, "expected mrbc_addlib_init(mrbc_vm *vm) definition"
+    assert_match(/addlib_init\(\);/, init)
+    assert_match(/mrbc_define_method\(0, 0, "add", c_suppi_add\);/, init)
+    assert_match(/mrbc_define_method\(0, 0, "boom", c_suppi_boom\);/, init)
+  end
+
+  def test_gem_init_matches_lifecycle_hook_signature_and_delegates_to_mrbc_init
+    assert_match(/void mrb_picoruby_addlib_gem_init\(mrb_state \*mrb\) \{ \(void\)mrb; mrbc_addlib_init\(0\); \}/, @c)
   end
 
   def test_gem_final_matches_lifecycle_hook_signature

@@ -23,13 +23,16 @@ module Suppify
         init_func = "mrb_#{gem_name.tr('-', '_')}_gem_init"
         src = File.join(out_dir, "src")
         inc = File.join(out_dir, "include")
+        mrblib = File.join(out_dir, "mrblib")
         FileUtils.mkdir_p(src)
         FileUtils.mkdir_p(inc)
+        FileUtils.mkdir_p(mrblib)
 
         File.write(File.join(src, "#{lib_name}_gen.c"), c_source)
         File.write(File.join(src, "#{lib_name}.h"), header) # quoted include from src/*.c
         File.write(File.join(inc, "#{lib_name}.h"), header)  # public header for consumers
         File.write(File.join(src, "binding.c"), render_binding(lib_name, init_func, exports))
+        File.write(File.join(mrblib, "#{lib_name}.rb"), mrblib_stub(lib_name))
         RuntimeSources.copy_flat(spinel_lib, src)
 
         symbols = discover_symbols.call(spinel_lib)
@@ -53,6 +56,20 @@ module Suppify
           #{Binding::Mruby.render(lib_name, init_func, exports)}
           #endif
         C
+      end
+
+      # Load-bearing even though it defines nothing: picoruby-require's
+      # collect_gems task only puts a gem into the mrubyc prebuilt_gems[]
+      # require table if the gem has mrblib/*.rb to compile into the
+      # table's bytecode entry. Without it, `require '<lib>'` fails and
+      # mrbc_<lib>_init (which registers the native methods) never runs.
+      def mrblib_stub(lib_name)
+        <<~RUBY
+          # #{lib_name} is a suppify-generated native gem. Its Ruby-visible
+          # methods are C functions registered on Object by mrbc_#{lib_name.tr('-', '_')}_init
+          # (src/binding.c) when this gem is required; this file only anchors
+          # the gem in picoruby-require's prebuilt gem table.
+        RUBY
       end
 
       # version/license are consumer-controlled: a placeholder version is
