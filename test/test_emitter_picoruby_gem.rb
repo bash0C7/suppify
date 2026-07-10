@@ -133,4 +133,20 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "add"/, binding)
     end
   end
+
+  # binding.c must adapt to whichever VM the consumer's own picoruby build
+  # selects (PICORB_VM_MRUBYC is PicoRuby's actual default on microcontroller
+  # targets; the previous mruby-only binding registered against an inert
+  # compiler-side mrb_state that the running mrubyc VM never sees, so calls
+  # from Ruby raised NoMethodError on real hardware -- see HANDOFF).
+  def test_binding_has_mrubyc_branch_dispatched_by_picorb_vm_mrubyc
+    Dir.mktmpdir do |root|
+      out = emit(root)
+      binding = File.read(File.join(out, "src", "binding.c"))
+      assert_match(/#if defined\(PICORB_VM_MRUBYC\)/, binding)
+      assert_match(/#include <mrubyc\.h>/, binding)
+      assert_match(/mrbc_define_method\(0, 0, "add", c_suppi_add\)/, binding)
+      assert_match(/#else/, binding)
+    end
+  end
 end

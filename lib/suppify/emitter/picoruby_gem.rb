@@ -1,6 +1,7 @@
 # lib/suppify/emitter/picoruby_gem.rb
 require "fileutils"
 require "suppify/binding/mruby"
+require "suppify/binding/mrubyc"
 require "suppify/runtime_sources"
 require "suppify/symbol_prefix"
 
@@ -28,13 +29,30 @@ module Suppify
         File.write(File.join(src, "#{lib_name}_gen.c"), c_source)
         File.write(File.join(src, "#{lib_name}.h"), header) # quoted include from src/*.c
         File.write(File.join(inc, "#{lib_name}.h"), header)  # public header for consumers
-        File.write(File.join(src, "binding.c"), Binding::Mruby.render(lib_name, init_func, exports))
+        File.write(File.join(src, "binding.c"), render_binding(lib_name, init_func, exports))
         RuntimeSources.copy_flat(spinel_lib, src)
 
         symbols = discover_symbols.call(spinel_lib)
         File.write(File.join(src, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
 
         File.write(File.join(out_dir, "mrbgem.rake"), mrbgem_rake(gem_name, lib_name, version, license))
+      end
+
+      # A single binding.c that adapts to whichever VM the consumer's own
+      # picoruby build selects: PICORB_VM_MRUBYC (mruby/c -- PicoRuby's
+      # default, and what microcontroller targets like R2P2-ESP32 actually
+      # run) gets the mrubyc-native registration; anything else (full mruby,
+      # PICORB_VM_MRUBY) keeps today's mrb_define_method binding. Mirrors
+      # the #if/#elif VM dispatch already used by this ecosystem's other
+      # hand-written mrubyc gems (e.g. picoruby-irq's src/irq.c).
+      def render_binding(lib_name, init_func, exports)
+        <<~C
+          #if defined(PICORB_VM_MRUBYC)
+          #{Binding::Mrubyc.render(lib_name, init_func, exports)}
+          #else
+          #{Binding::Mruby.render(lib_name, init_func, exports)}
+          #endif
+        C
       end
 
       # version/license are consumer-controlled: a placeholder version is
