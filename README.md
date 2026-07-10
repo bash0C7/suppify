@@ -8,12 +8,12 @@ build or run time. Design rationale: `docs/superpowers/specs/2026-06-21-suppify-
 
 ## Status
 
-The core pipeline plus the `c`, `cruby`, and `picoruby` targets are
-implemented and each verified end-to-end against a real `spinel` (and, for
-`picoruby`, a real picoruby host build) — see `HANDOFF.md` for exactly
-what's proven and what open gaps remain (scalar-only types, stateful
-classes, on-device/on-iPhone runs as opposed to host builds). Treat this as
-a working core, not a finished, broadly-hardened tool.
+The `c`, `cruby`, and `picoruby` targets are implemented and verified
+end-to-end against a real `spinel` (for `picoruby`, against a real
+picoruby host build). Known limits: scalar types only (no `Array`/`Hash`/
+custom classes), top-level methods only. Work in flight is tracked in
+`HANDOFF.md`. Treat this as a working core, not a finished,
+broadly-hardened tool.
 
 ## Requirements
 
@@ -215,6 +215,7 @@ exactly as written (`add(2, 3)`), whether from C, CRuby, or PicoRuby.
    picoruby-addlib/
      mrbgem.rake
      include/addlib.h        # public neutral header for consumer/firmware code
+     mrblib/addlib.rb        # stub anchoring the gem in picoruby-require's prebuilt gem table
      src/
        addlib.h               # same header, quoted-include form for src/*.c
        addlib_gen.c
@@ -365,14 +366,21 @@ relative to the `build_config` file's own directory, not your terminal's
 working directory or the picoruby repo root, so an absolute path (as shown
 above) sidesteps that entirely.
 
-- **VM selection is a real, load-bearing requirement: `conf.picoruby`, not
-  `conf.femtoruby`.** suppify's generated mruby binding targets picoruby's
-  `PICORB_VM_MRUBY` VM (`mrb_state`, `mrb_value`, `mrb_get_args`,
-  `mrb_define_method`, ...) — that API only exists when the build_config
-  selects it via `conf.picoruby`. picoruby's other VM variant, selected by
-  `conf.femtoruby` (`PICORB_VM_MRUBYC`, the mruby/c VM), exposes a
-  different, incompatible API; a suppify-generated mrbgem won't compile
-  against it.
+- **The generated binding adapts to both of picoruby's VMs.** The emitted
+  `binding.c` dispatches on whether the consuming build defines
+  `PICORB_VM_MRUBYC`: under the mruby/c VM (what microcontroller firmware
+  such as R2P2-ESP32 runs) it registers via mrubyc's API
+  (`mrbc_define_method`), under the full-mruby VM (`PICORB_VM_MRUBY`) via
+  `mrb_define_method`. Which VM a build_config method (`conf.picoruby`,
+  `conf.microruby`, ...) selects differs between picoruby versions — check
+  your checkout's `lib/picoruby/build.rb` rather than relying on the
+  method name.
+- **On the mruby/c VM, `require '<lib_name>'` activates the gem.**
+  Registration runs through picoruby-require's prebuilt gem table — that
+  table is what the emitted `mrblib/<lib_name>.rb` stub anchors the gem
+  in — so call `require 'addlib'` before using the exported methods. On
+  the full-mruby VM the methods are registered at gem-init time and no
+  `require` is needed.
 - **Most of the other defines in the walkthrough's `build_config` are not
   suppify requirements** — they're picoruby's own standard POSIX host
   recipe (the same set `build_config/default.rb` uses), and three of them

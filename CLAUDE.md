@@ -3,6 +3,11 @@
 suppify = spinel が出力した native コードを、呼び出し可能・組み込み可能な中立ライブラリ
 （`.a` + C header）へ変換する外部ツール。設計は `docs/superpowers/specs/2026-06-21-suppify-design.md`。
 
+構成は 1層=1ファイル: `lib/suppify/core.rb`（Ruby+`.rbs` → 中立C）／`lib/suppify/bindings.rb`
+（VM 別 C ラッパー）／`lib/suppify/package.rb`（ターゲット別成果物組み立て）／`lib/suppify/cli.rb`。
+テストも同じ区切り（`test/test_{core,bindings,package,cli}.rb` + 統合テスト群）。
+この粒度を維持する — マイクロステップ単位のファイル分割へ戻さない。
+
 > グローバル / 親ディレクトリの CLAUDE.md の規律はすべて継承する。
 
 ## この repo の規約
