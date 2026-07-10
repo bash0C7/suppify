@@ -1,124 +1,118 @@
 # HANDOFF — suppify
 
-状態: **進行中（branch `feat/cross-compile`）。cruby / picoruby ターゲットエミッタを実装し、両方とも実機 E2E で実証済み。fresh-context 敵対的検証で見つかった文字列引数のメモリ安全性バグを修正済み。さらに、複数 suppify ライブラリの同居（symbol namespacing）・文字列戻り値の embedded-NUL 切り詰め・GC-root リーク・gem メタデータを一通り仕上げ、その仕上げ自体も2ラウンドの fresh-context 敵対的検証にかけて計5件の実バグを発見・修正済み**。
-worktree `.claude/worktrees/suppify-cross-compile`、working tree clean。**118 テスト**：spinel + picoruby ローカルチェックアウトが揃う環境で全 118 green（omission 0、警告 0）。前提が無い環境では gated 統合テストが自動 omit され、それでも green。（コード簡素化パスで dead code 削除に伴い 117→113 に変化した後、spinel 再ピン検証ヘルパーのテスト5件が増えて 118——`docs/superpowers/plans/2026-07-05-suppify-code-simplification.md`・`docs/superpowers/plans/2026-07-05-suppify-spinel-repin-bundler-workflow.md` 参照。）
-本 branch はコード簡素化パス（"Plan 2 不要" 判断）まで main に統合済み。その後さらに「spinel.pin + `rake spinel:check_pin`（再ピン検証の継続的な繰り返し）」と「README cruby 例を Bundler `git:` source workflow へ移行（`gem` コマンド不使用化）」を追加済み（下記セクション参照）。
-次にやること: `rake spinel:check_pin` の実クローン+ビルド検証は外部未検証コードの実行にあたりサンドボックス上 user 承認が必要（未実施）。それ以外はテスト green、本 branch を main へ統合する方針を user と確認（push/PR は承認必須）。
+状態: **完了（suppify 側）**。`picoruby-ot` の otmeiwa AOT パイロット（実機で `NoMethodError`）を起点に発見した「`suppify -t picoruby` が mruby/c (mrubyc) VM 向けの binding を生成できていない」不具合を修正し、実物ヘッダに対するスタンドアロンコンパイル検証・`rake test` とも green。commit 済み（`16a1e00`）。次はここから picoruby-ot 側（spinel ローカルビルド〜再ベンダリング〜実機再検証〜ベンチマーク）に進む。
 
-## symbol namespacing 実装の敵対的検証で発見・修正した5件
+以前の HANDOFF 内容（cross-compile ブランチ / symbol namespacing 話）は既に main へ統合済みの過去作業。本ドキュメントで完全に置き換える。
 
-**1ラウンド目**（gem メタデータ・CLI 周り）:
-1. **gemspec/mrbgem.rake の `--gem-version` 未エスケープ**（重大）: `license` は `.inspect` で正しくエスケープされていたが `version` は生の文字列補間だった。`"` を含む version 値でエスケープを脱出でき、`gem build`/`bundle`/picoruby の Rake ビルドが読み込んだ瞬間に任意 Ruby が実行されうる。実際に `system("touch ...")` を注入して再現確認 → `.inspect` に統一して修正。
-2. **`lib_name` が C 識別子として未検証**（重大）: `SymbolPrefix.prelude` は `#define sym lib_name_sym` を生成するが、`lib_name` にハイフン等が入ると（`-o my-lib` は自然な命名）プリプロセッサのトークン化が壊れ、リネーム済み全シンボルが不正な式になる。実際に `-o my-lib` で20件以上のコンパイルエラーを再現 → CLI で C 識別子検証を追加（不正なら明確なエラー）。あわせて spinel 自身のランタイムソースのベース名（`sp_gc` 等）との衝突も拒否するようにした。
-3. **CLI 引数パーサがフラグの値を無検証で消費**（中）: `--license -o mylib` のような取り違えで `-o` の値が silently 消える・エラーメッセージが的外れになる問題を確認 → 値が欠落しているか別のフラグに見える場合は明確なエラーを出すよう修正。
+## これは何のための作業か（発端）
 
-**2ラウンド目**（trampoline/binding、セッション制限からの再開後）:
-4. **frozen 文字列で embedded-NUL 切り詰めバグが再発**（重大）: `<lib_name>_str_len` が委譲する spinel 自身の `sp_str_byte_len` は marker byte `0xfe`/`0xfc`/`0xfd` しか認識せず、`.freeze` や `# frozen_string_literal: true`（非常に一般的な magic comment）が付けるマーカー `0xf1` を見落として `strlen` にフォールバックする。実際に `# frozen_string_literal: true` 付きの embedded-NUL 文字列で `bytesize` が壊れることを再現 → spinel の `sp_str_freeze_val` はマーカーバイトを書き換えるだけでヘッダ自体は有効なままと確認できたので、`<lib_name>_str_len` 内でこの1マーカーだけ直接ヘッダを読むよう拡張して修正（spinel 自身は無改変）。
-5. **空文字列 `--license ""` が PicoRuby の MIT フォールバックを回避**（軽微）: `opts[:license] || "MIT"` は Ruby の truthy 判定上、空文字列を「設定済み」とみなしフォールバックしない。picoruby 側の必須チェックも空文字列は素通しするため、ビルド失敗ではなく `spec.license = ""` という無意味な値が静かに書かれてしまう → 空文字列も「未設定」として扱うよう修正。
+`picoruby-ot`（別リポジトリ、`~/dev/src/github.com/bash0C7/picoruby-ot`）で、ESP32 実機上の PicoRuby アプリ `otmeiwa.rb` の一部の数値計算（距離EMA平滑化・加速度差分スケーリング）を spinel/suppify で AOT ネイティブコンパイルし、**実際に楽器として演奏できる速度改善**を実証するパイロットを進めていた。
 
-（GC-root リークの save/restore・nil 返却時の NULL 未ガードについても2ラウンド目で精査されたが、現状の設計では到達不能／すでに正しく機能していることを確認済み。）
+完了基準（user 発言そのまま）:
+> 完了基準はAOT版で実際に演奏できること。現行版と交互に入れ替えてスループット計測できることね。
 
-**ドーマントな既知の制限として文書化のみ（修正せず）**: `SymbolPrefix.discover_runtime_symbols` は `SP_THREADS` 無しでランタイムをコンパイルするため、spinel のスレッド版ランタイムにのみ存在するグローバル（`sp_heap_lock`/`sp_sched_sleep`/`sp_sched_wait_io`）は未リネームのまま残る。現状 suppify のどのターゲットも `SP_THREADS` を有効化しないため今は無害。
+この基準は**まだ一度も達成されていない**（後述、次のフェーズ）。
 
-**注記**: main には Plan 1（コア: spinel→中立 C `.a`+ヘッダ、CRuby ネイティブ拡張から呼べることまで実証）がマージ済み。本 branch はその上に「ターゲットエミッタ層」＋「複数ライブラリ同居対応」を足したもの。
+## 発見した根本原因（確認済み）
 
-## Plan 2（自己ホスト化）は不要と判断
+`suppify -t picoruby` が生成する `binding.c` は **full mruby の C API**（`mrb_state`/`mrb_value`/`mrb_define_method(mrb, mrb->kernel_module, ...)`）だけを使っていた。しかし PicoRuby は組み込み向けでは **mruby/c (mrubyc) VM** を実行時に使うのが標準（R2P2-ESP32 は `conf.picoruby(alloc_libc: false)` でビルド、これは `PICORB_VM_MRUBYC` + `DISABLE_MRUBY` を設定する）。
 
-`docs/superpowers/plans/2026-06-21-suppify-core.md` に記載されていた、suppify
-自身をいずれ spinel でコンパイルするという未着手の構想（Plan 2）は不要と判断
-された。これを見越して書かれていた投機的コード（自前 JSON パーサ、backtick
-シェル実行、CLI の誤った根拠コメント）は簡素化パスで削除済み
-（`docs/superpowers/specs/2026-07-05-suppify-code-simplification-design.md`）。
-`docs/superpowers/plans/2026-06-21-suppify-core.md` 自体は Plan 1 の完了済み
-計画書として履歴のまま残す。
+`mrb_state` という型は mrubyc モードでは実行時には無関係な、コンパイラ側だけの型として存在するため、suppify 生成の `binding.c` は `mrb_define_method` で「実際に動いている mrubyc VM とは無関係な mrb_state」に登録していた。コンパイル・リンクは通り ESP32 実機で起動もするが、Ruby から該当メソッドを呼んだ瞬間に `NoMethodError` になっていた。
 
-## spinel 再ピン検証の継続化 + Bundler-only cruby workflow
+picoruby-ot 側の問題ではなく **suppify 自身の `-t picoruby` ターゲットの欠陥**（mrubyc 対応が最初から無かった）。
 
-（`docs/superpowers/specs/2026-07-05-suppify-spinel-repin-bundler-workflow-design.md`）
+### 別に見つけた、おそらく無関係な既存バグ（未確認・未対応・user未報告）
 
-- `spinel.pin`: 動作確認済みの spinel commit を1行で記録（初期値 `9394f6e0da417d40afc876fae83413d159aff11d`）。
-- `rake spinel:check_pin[ref]`（`rakelib/spinel.rake`）: 任意の spinel ref を clone・ビルドし、この repo のテストスイート丸ごとを against で走らせ、`Suppify::RuntimeSources::SOURCES` と spinel の `Makefile` `RT_MEMBERS` を diff する。`spinel.pin` の書き換えは行わない（人間が判断）。`rake test`（default task）には含めない — 外部リポジトリの未検証コードを clone/ビルドする操作のためサンドボックス上 user 承認が必要（このセッションでは2度試みて2度とも拒否され、未実行のまま）。
-- README の cruby ターゲット例: 最終ステップを `gem build`/`gem install` から Bundler `git:` source workflow（`bundle install` だけで native extension が自動ビルドされる。`path:` source では自動ビルドされない）に置換。実機で通しの動作確認済み（`add(2,3)==5`）。
+`picoruby-irq`（picoruby-ot の既存 gem）は `mrbc_irq_init(mrbc_vm *vm)` という関数を定義しているが、`mrb_picoruby_irq_gem_init(mrb_state *mrb)` の定義がどこにも見当たらない。同様の調査中、`picoruby-crc`（`picoruby-shell` の依存経由で xtensa-esp.rb の `shell` gembox から実際に ESP32 ビルドに含まれる）も同じパターン ―― `mrubyc/crc.c` は `mrbc_crc_init(mrbc_vm*)` のみを定義し `mrb_picoruby_crc_gem_init(mrb_state*)` を定義していないが、aggregate の `gem_init.c` はこの後者を無条件に呼ぶ形で生成されている。`build/esp32` 配下には `.o`/`.a` はあるが最終 `.elf` が存在せず、この picoruby チェックアウト単体でフルリンクまで到達した形跡が無い（実際の R2P2-ESP32 ファームウェアは ESP-IDF 経由の別ビルドパイプラインで生成されるため、ここでのリンク未実施は异常ではない）。**suppify の今回の修正とは無関係の別問題**なので今は追わない。次にこの領域（`picoruby-irq`/`picoruby-crc` がmrubyc ESP32 ビルドで実際にリンク・動作するか）を触るときのために記録だけしておく。
 
-## このリポジトリは何か
+## 今回の修正（suppify 側、完了）
 
-`suppify` = spinel でコンパイルした Ruby を、どこからでも呼べる中立 C ライブラリへ変換する外部ツール。spinel 本体は無改変。正本ドキュメント:
+### やったこと
 
-- 設計: `docs/superpowers/specs/2026-06-21-suppify-design.md`（§13 にターゲットエミッタ層を追記済み）
+1. `lib/suppify/binding/mrubyc.rb`（新規）: mrubyc 向け binding 生成モジュール `Suppify::Binding::Mrubyc`。`Binding::Mruby`（既存）と同じ形の API（`render(header_name, init_func, exports)`）。
+   - 各 wrapper 関数は `static void c_suppi_<name>(struct VM *vm, mrbc_value v[], int argc)` 形式。
+   - `v[i].tt` を手動で型チェックして `mrbc_raise(vm, MRBC_CLASS(ArgumentError), ...)`（既存の手書き mrubyc gem `picoruby-irq/src/mrubyc/irq.c` と同じ書き方）。bool 引数は型チェックせず Ruby の truthy 判定のみ。
+   - 戻り値は `SET_INT_RETURN`/`SET_FLOAT_RETURN`/`SET_BOOL_RETURN`/`SET_NIL_RETURN`、文字列は `mrbc_string_new(vm, r, <lib>_str_len(r))`（既存 mruby binding と同じ embedded-NUL 対策）。
+   - gem 初期化関数は **`mrb_<lib_name>_gem_init(mrb_state *mrb)`**（aggregate gem 初期化テーブルが VM 種を問わずこのシグネチャで無条件に呼ぶため）。`mrb_state` は **`#define mrb_state void` をファイル冒頭でローカルに定義**（`#include <mruby.h>` はしない ―― 下記「中断していた検証で判明した追加の事実」参照）。関数内で `mrbc_define_method(0, 0, "<name>", c_suppi_<name>)` を呼ぶ（`0, 0` は vm/cls 省略で Object クラスに登録、`picoruby-mrubyc` 自身の `rrt0.c` と同じ convention）。
+2. `test/test_binding_mrubyc.rb`（新規）: 上記の生成内容を検証する unit test。TDD で `mrb_state` ローカル定義のテストも追加。**全通過**（11 tests, 30 assertions）。
+3. `lib/suppify/emitter/picoruby_gem.rb`（修正）: `binding.c` の生成を単一の `render_binding` メソッド経由にし、`#if defined(PICORB_VM_MRUBYC) ... #else ... #endif` という1ファイルにまとめた（consumer 側のビルドが `PICORB_VM_MRUBYC` を define しているかで自動的にどちらか一方だけがコンパイルされる）。
+4. `test/test_emitter_picoruby_gem.rb`（修正）: mrubyc 分岐の生成内容（`#include <mrubyc.h>`・`mrbc_define_method`・`#else`）も assert するテストを追加。
+5. `rake test`（suppify 全テスト）: **130 tests, 281 assertions, 0 failures**（spinel/picoruby 依存の統合テストは環境未整備で 11 件 omission、想定通り）。
+6. commit 済み（ローカル、origin `bash0C7/suppify` につき自律 commit。push はしていない）。
+
+### 中断していた検証で判明した追加の事実（今回で解決）
+
+前回中断地点は「`Binding::Mrubyc.render` に `#include <mruby.h>` が無いため `mrb_state` が unknown type name になる」だった。素朴に `#include <mruby.h>` を足して実物ヘッダ（picoruby-ot が pin している `picoruby-mruby/lib/mruby/include/mruby.h`、`common()` メソッドが常にこのパスを include path に加えるため解決されるのはこちら＝本物の mruby.h）に対してスタンドアロンコンパイルしたところ、**新しいコンパイルエラーを発見した**: 本物の `mruby.h` と `mrubyc.h`（`picoruby-mrubyc/lib/mrubyc/src/value.h`）は両方とも `mrb_int`/`mrb_float`/`E_RUNTIME_ERROR` 等のレガシー互換 typedef・マクロを**非互換な型で**定義しており、同一 TU で両方 include すると `typedef redefinition with different types` 等のコンパイルエラーになる（`gcc -c` で実測・再現済み）。
+
+対処: `#include <mruby.h>` はせず、**`#define mrb_state void` をファイル冒頭でローカルに定義**する方式に変更した。これは `picoruby-mrubyc/include/mruby.h` という薄いシムがまさに同じことをしている（`#define mrb_state void`）のと同じ発想で、外部ヘッダの include path 解決順（`common()` が本物の mruby.h を先に登録するため実際にはこのシムは通常勝てない）に依存せず、`gem_init` が `mrb_state` を never-dereference のポインタとしてしか使わない（`(void)mrb;`）という事実だけを使って自己完結させた。
+
+再検証結果:
+- mrubyc 側 (`PICORB_VM_MRUBYC` 定義): 実物 `picoruby-mrubyc`/`picoruby-mruby` ヘッダに対して `gcc -c` **エラー無く通過**。
+- mruby 側 (`#else` 分岐、`Binding::Mruby` 既存): 実物 `picoruby-mruby` ヘッダに対して `gcc -c` **エラー無く通過**（regression 無し）。
+
+再現コマンド（`/tmp` 配下は ephemeral、必要なら再生成）:
+```bash
+# 1. binding.c を実際の export 定義から生成（mrubyc 側）
+ruby -Ilib -e '
+require "suppify/binding/mrubyc"
+require "suppify/signature"
+exports = [
+  {"public"=>"otmeiwa_distance_tick","cname"=>"sp_otmeiwa_distance_tick",
+   "sig"=>Suppify::Signature.new("mrb_int",[["mrb_int","raw_distance"],["mrb_int","prev_distance"]])},
+  {"public"=>"otmeiwa_accel_tick","cname"=>"sp_otmeiwa_accel_tick",
+   "sig"=>Suppify::Signature.new("mrb_int",[["mrb_int","ax"],["mrb_int","ay"],["mrb_int","az"],["mrb_int","bx"],["mrb_int","by"],["mrb_int","bz"]])},
+]
+puts Suppify::Binding::Mrubyc.render("otmeiwa_aot", "mrb_picoruby_otmeiwa_aot_gem_init", exports)
+' > /tmp/mrubyc_binding.c
+
+# 2. 実物の picoruby-mrubyc ヘッダに対してスタンドアロンコンパイル
+GEM=/Users/bash/dev/src/github.com/bash0C7/picoruby-ot/src_components/R2P2-ESP32/components/picoruby-esp32/picoruby/mrbgems/picoruby-otmeiwa_aot
+OLD=/Users/bash/dev/src/github.com/bash0C7/picoruby-ot/components/R2P2-ESP32/components/picoruby-esp32/picoruby
+gcc -c -std=gnu99 -Wall \
+  -DPICORB_VM_MRUBYC -DDISABLE_MRUBY -DMRBC_ALLOC_LIBC -DMRBC_TICK_UNIT=10 -DMRBC_TIMESLICE_TICK_COUNT=1 \
+  -DMRBC_USE_FLOAT=2 -DMAX_SYMBOLS_COUNT=1000 -DMAX_VM_COUNT=255 -DMAX_REGS_SIZE=255 -DMRBC_USE_MATH=1 \
+  -I"$OLD/mrbgems/picoruby-mruby/lib/mruby/include" \
+  -I"$OLD/mrbgems/picoruby-mrubyc/include" \
+  -I"$OLD/mrbgems/picoruby-mrubyc/lib/mrubyc/src" \
+  -I"$OLD/mrbgems/picoruby-mrubyc/lib/mrubyc/hal/posix" \
+  -I"$GEM/include" \
+  -o /tmp/mrubyc_binding.o /tmp/mrubyc_binding.c
+```
+
+## その先（次にやること — picoruby-ot 側）
+
+1. 実際に spinel をローカルビルドし、`suppify -t picoruby` で otmeiwa_core.rb から `picoruby-otmeiwa_aot` gem を再生成（既存の `native/otmeiwa_core/README.md`／`rake native:otmeiwa_aot` タスクが picoruby-ot 側にある）。
+2. 再生成した gem を picoruby-ot の `src_components/.../mrbgems/picoruby-otmeiwa_aot/` に再ベンダリング。**このとき、Xtensa/ESP32 ポータビリティ対応で入れた4パッチ（`mrbgem.rake`/`sp_fiber_ctx.h`/`sp_io.c`/`sp_runtime.h`、picoruby-ot commit `6ce9141` で既にコミット済み）を再度当て直す必要がある**（gem 再生成で上書きされるため）。
+3. ESP32 向けにビルド（`CFLAGS="-Wno-error=implicit-function-declaration"` が必要、newer clang の `-Wimplicit-function-declaration` エラー化対策。picoruby-ot 側の別問題、suppify とは無関係）。
+4. 実機に転送し、`otmeiwa_aot.rb` が `NoMethodError` を出さず最後まで実行できることを確認。
+5. **まだ一度も実施していない、本来の完了基準**: `otmeiwa.rb`（現行/interpreted 版）と `otmeiwa_aot.rb`（AOT 版）を実機で交互に入れ替え、`/dev --debug` の fps 計測ツールでスループットを比較する。
+
+## picoruby-ot 側の現在の状態（このリポジトリではないが、一連の作業の一部）
+
+- リポジトリ: `~/dev/src/github.com/bash0C7/picoruby-ot`、branch `joyful_meiwa_2026`、working tree clean（HEAD `6ce9141`）。
+- 実装済み・レビュー済み: `native/otmeiwa_core/`（TDD済みのプレーン Ruby 実装 + host validation）、`otmeiwa_aot.rb`（`otmeiwa.rb` は一切未変更）、vendoring、rake タスク、dev tooling docs。
+- Xtensa/ESP32 クロスコンパイル自体は実証済み（4パッチ、上記2参照）。フルリンク（`.elf` 生成）まではこのチェックアウト単体では未実施（ESP-IDF 経由のビルドパイプラインで別途行う想定）。
+- 実機で `NoMethodError`（本 HANDOFF の主題、suppify 側修正済み）。ベンチマークは未達成。
+
+## このリポジトリ（suppify）は何か
+
+`suppify` = spinel でコンパイルした Ruby を、どこからでも呼べる中立 C ライブラリ／mrbgem へ変換する外部ツール。spinel 本体は無改変。正本ドキュメント:
+
+- 設計: `docs/superpowers/specs/2026-06-21-suppify-design.md`
 - README.md（利用者向け。`--target`・`--gem-version`・`--license` と各ターゲットの使い方）
 
-## 3層構造 + ターゲットエミッタ
-
-**発想**: suppify 自身がクロスコンパイルするのをやめ、「どのツールチェーンでもビルドできるソース一式＋ビルド指示書」を吐く。コンパイルは consumer のビルドが自分の正しいフラグ（`-mlongcalls`・`MRB_NO_BOXING` 等）で行う。ゆえに ABI 一致が構造的に保証され、新ターゲットは「そのビルドが対応する arch」に自動追従する。
-
-- **コア**: Ruby + `.rbs` → 中立 C（`.c` + ヘッダ + トランポリン）。
-- **バインディング**: `lib/suppify/binding/{cruby,mruby}.rb`。中立 C 関数をホスト言語のメソッドに包む（`rb_*` / `mrb_*` マーシャリング）。型分類は `NeutralType.kind`（:int/:float/:string/:bool/:void）。
-- **エミッタ**: `lib/suppify/emitter/{cruby_gem,picoruby_gem}.rb`。ビルド可能な gem 一式を組み立てる。ランタイムソースは `lib/suppify/runtime_sources.rb` が spinel の 25 本の `.c` ＋ヘッダを src にフラット同梱（quoted include が同一 dir で解決）。
-
-CLI: `-t/--target c|cruby|picoruby`（既定 `c`）、`--gem-version <ver>`（既定 `0.1.0`）、`--license <name>`（既定未設定。picoruby は build 上必須なので内部で `MIT` にフォールバック）。`cruby`/`picoruby` は `SPINEL_LIB` 必須（ランタイムソース同梱のため）。
-
-## 複数 suppify ライブラリの同居（本セッションの主題）
-
-以前は「1バイナリにつき suppify ライブラリは1つまで」という制約があった。spinel のランタイム（`sp_gc_alloc`/`sp_str_heap` など約600個のグローバルシンボル。25本の `lib/*.c` に加え、`sp_runtime.h` 自体にも約200個が非 static 関数本体として直接埋め込まれている）と suppify 自身の固定名シンボル（`sp_lib_init`/`suppi_error`/`suppi_error_message`）が、spinel の「1バイナリ1プログラム」前提のプロセス全体グローバルだったため。
-
-**修正**: 新モジュール `lib/suppify/symbol_prefix.rb`。
-1. `discover_runtime_symbols(spinel_lib)` — フラット化したランタイムソース一式 + 「生成プログラム TU が普通提供する3つの static stub 関数 + `#include "sp_runtime.h"`」を模したスタブを実際にコンパイルし、`nm` で外部リンケージのシンボルを全列挙（Mach-O の先頭 `_` は剥がす）。`sp_ctx_swap`（spinel の Fiber コンテキストスイッチ）だけは除外——`sp_fiber.c` 内で `#define` した文字列をそのまま `__asm__` ブロックのシンボル名に使っており、プリプロセッサの文字列置換が届かないため。ステートレスでライブラリ間で内容が完全に同一なので、共有のままでも実害はない。
-2. `prelude(lib_name, symbols)` — 発見した各シンボルを `#define sym lib_name_sym` する C ヘッダを生成。あわせて vendored runtime 由来の無害な警告（`-Wunused-function` 等）を `#pragma` で抑制（clang 固有のものは `#if defined(__clang__)` で保護し、ESP32 のような素の gcc クロスツールチェーンに未知 pragma 警告を出さない）。
-3. このヘッダを `-include` で、そのライブラリのために compile する全 `.c` に強制インクルード:
-   - **`c` target**（`Builder`）: 従来はビルド済み `libspinel_rt.a` をコピーするだけだったが、**ライブラリごとにランタイムを再コンパイル**し、生成 TU と合わせて **1つの自己完結 `lib<name>.a`** にマージ（`libspinel_rt.a` を別途リンクする必要が無くなった）。
-   - **`cruby`/`picoruby`**: prelude をバンドルディレクトリに書き出し、`extconf.rb`/`mrbgem.rake` に `-include` で配線。
-
-suppify 自身の3固定シンボル（`sp_lib_init`/`suppi_error`/`suppi_error_message`）は macro ではなく **Ruby の文字列補間で直接** `<lib_name>_init`/`<lib_name>_error`/`<lib_name>_error_message` に改名（`trampoline.rb`/`header.rb`/両 binding/`pipeline.rb`）。
-
-**実機実証（複数ライブラリ同居）**:
-- **CRuby**: `addlib`/`mullib` 相当の2つの gem を実ビルドし、同一 Ruby プロセスで両方 `require`。両方の関数が正しく動作し、エラー状態も独立していることを確認。
-- **PicoRuby**: 同様に2つの mrbgem を実 picoruby ホストビルドに組み込み（`conf.gem gemdir:` を2回）、1つの `picoruby` バイナリの中で両方の関数を実行。エラー状態の独立性も確認。
-- **`c` target の既知の制限**: 2つの `.a` を直接 `cc ... -laddlib -lmullib` でリンクすると、**`sp_ctx_swap` の重複シンボルで依然リンクエラーになる**（両ライブラリの生成 TU が GC のフィボナ根マーキング経由で無条件に自分の `sp_fiber.o` を要求するため）。CRuby（dlopen/RTLD_LOCAL による分離）・PicoRuby（実ビルドで確認済み、理由は完全には特定できていないが再現された事実として確認）では発生しない。`c` target で複数ライブラリを1バイナリに直接リンクしたい場合のみ残る制限として明記。
-
-## 文字列引数のメモリ安全性バグ（発見・修正済み）
-
-fresh-context 敵対的検証ワークフローが1件の確定バグを発見: `trampoline.rb` が文字列引数を spinel にホスト VM のバッファポインタのまま渡していた。spinel の文字列は `sp_str_hdr`（24byte ヘッダ）+ `ptr[-1]` のマーカーバイトを前提とするため、生ポインタを渡すと毎回 1byte の境界外読み取り（UB）、約 3/256 の確率でマーカーバイト誤認による巨大 over-read（クラッシュ/ヒープ漏洩）が起きる。ホスト（macOS arm64）ターゲットでも発生する、cross-compile 固有ではない一般バグだった。
-
-修正（`lib/suppify/trampoline.rb`）:
-1. 各 `:string` 種別の引数を `sp_str_dup_external(name)` で dup してから渡す（spinel 自身が argv/getenv に対して行うのと同じ扱い）。
-2. **複数文字列引数の GC 窓**: dup した文字列は callee に渡るまでただの C 一時変数で、GC からは見えない。2つ目の dup が内部で GC を誘発すると、1つ目の（まだ unrooted な）dup 済み文字列が sweep されうる。実際に string heap のバイト数を意図的に閾値直前まで積んで実証（`SPINEL_GC_STRESS=1` で threshold=2048）。修正: 各 dup 済み文字列を named local に代入し、`SP_GC_ROOT`（spinel 自身のコード生成がローカル変数に使うのと同じマクロ）で直後に root する。
-3. **GC-root カウントのリーク**: `SP_GC_ROOT` の cleanup attribute による自動 pop は、longjmp で自分の setjmp に戻る経路では発火しない（cleanup は通常の C スコープ終了時にしか動かない）。修正: 各トランポリン関数の入口で `sp_gc_nroots` をスナップショットし、例外捕捉パスで復元する。これにより、dup+root 済みの文字列引数呼び出し中に例外が起きても GC ルートカウントは正しく戻る（spinel 自身の未配線な `sp_exc_rootmark` 機構に依存しない、suppify 側だけで完結する対策）。
-4. **文字列戻り値の embedded-NUL 切り詰め**: `rb_str_new_cstr`/`mrb_str_new_cstr` は strlen 依存で埋め込み NUL より後ろを切り捨てる。spinel 自身の `sp_str_byte_len` を `<lib_name>_str_len` として中立境界越しに公開し、両 binding で `rb_str_new`/`mrb_str_new`（明示的長さ）に切り替え。実 spinel で `"a\0b"` が bytesize 3 のまま往復することを確認済み。
-5. 回帰テスト: `test/fixtures/add.rb` に `cat`（2引数文字列）・`nully`（embedded-NUL を含む文字列）を追加。`test_cruby_target_integration.rb`/`test_picoruby_target_integration.rb` の両方で実ビルド確認。
-
-## 生成コードの警告 — ゼロ達成
-
-`sp_lib_init` の `char *av[] = { "lib", 0 };` が strict なコンパイラで qualifier 破棄警告を出していた（suppify 自身のバグ）→ `(char *)` キャストで解消。vendored runtime 由来の警告（約330件あった `-Wunused-function` 等）は `SymbolPrefix.prelude` の `#pragma` で一括抑制。3ターゲットすべて（c/cruby/picoruby）で実ビルドの警告数がゼロであることを確認済み。
-
-## gem/mrbgem メタデータ
-
-- `--gem-version`（既定 `0.1.0`、旧 `0.0.0` プレースホルダから変更）、`--license`（既定未設定）を CLI に追加。
-- CRuby gemspec は `license` 未指定時は行ごと省略（rubygems は必須ではないため、憶測でライセンスを書くより省略の方が安全）。
-- PicoRuby の `MRuby::Gem::Specification#setup` は license/author が無いとビルド自体が失敗する（実ビルドで確認）ため、`picoruby_gem.rb` 側は既定 `MIT` を維持しつつ上書き可能にした。CLI 側では `opts[:license] || "MIT"` で明示的にフォールバック。
-
-## 実機で実証したこと（重要）
-
-`tmp/spinel`（main チェックアウトの実ビルドへの symlink、gitignore 済み）を使用。
-
-- **CRuby ターゲット**（`test_cruby_target_integration`, gated on spinel）: `suppify -t cruby` → `mkmf` で拡張ビルド → `require` → `add/half/greet/even/truthy/cat/nully` 往復、`boom` が `RuntimeError: "x"` を送出、**boom の後の `add(10,20)=30`**（per-call リセット実証）。`gem build` でパッケージ化も確認。複数ライブラリ同居も確認（上記）。
-- **PicoRuby ターゲット**（`test_picoruby_target_integration`, gated on spinel + `PICORUBY_ROOT`）: `suppify -t picoruby` → `conf.gem gemdir:` → 実 picoruby ホストビルドが生成 C ＋ spinel ランタイムソースを `libmruby.a` にコンパイル → ビルドした `picoruby` バイナリがスクリプトから同メソッド群を実行。複数 mrbgem 同居も確認（上記）。
-  - picoruby は生成 gem_init.c で `mrb_<gem>_gem_final` も参照するため、バインディングが空の gem_final も出す。
-  - `MRuby::Gem::Specification#setup` が license/author 必須であることも実ビルドで発覚・対応済み。
-
-## まだ手を付けていないこと
-
-- **on-device / on-iPhone の実行検証**: 現状の実証はホストビルドまで（M3 mac 上の CRuby 拡張と picoruby ホストバイナリ）。ESP32 実機・iOS 実機での実行は未。ただし picoruby のクロスビルド機構（xtensa/iOS build_config）に gem を渡す口は同じなので、機構としては通るはず。R2P2-ESP32 / R2P2-iOS への実配線は次の実弾。
-- **非スカラー境界**（Array/Hash/インスタンスを持つクラス）。現状 export できるのはスカラー（Integer/Float/String/Symbol/bool/void）を扱うトップレベルメソッドのみ。stackchan の `FrameParser`（stateful）等は opaque handle 設計が要る後続。
-- **Swift/他言語エミッタ**: 継ぎ目（`binding/` + `emitter/`）は用意済み。Swift は中立ヘッダを module map で直接 import できるため薄い。未実装。
-- **`c` target の複数ライブラリ直接リンク**: 上記の `sp_ctx_swap` 重複シンボルが既知の制限として残る。
+3層構造: コア（Ruby+`.rbs` → 中立C）／バインディング（`lib/suppify/binding/{cruby,mruby,mrubyc}.rb`）／エミッタ（`lib/suppify/emitter/{cruby_gem,picoruby_gem}.rb`）。CLI: `-t/--target c|cruby|picoruby`。`cruby`/`picoruby` は `SPINEL_LIB` 必須。
 
 ## 再開手順
 
-1. `export PATH="$(pwd)/tmp/spinel/bin:$PATH"; export SPINEL_LIB="$(pwd)/tmp/spinel/lib"; export PICORUBY_ROOT=/Users/bash/dev/src/github.com/picoruby/picoruby`（`tmp/spinel` は symlink 済み。無ければ main チェックアウトで `tmp/spinel` を再ビルド）。
-2. `bundle exec rake test` — spinel + picoruby 有りで unit + gated 全実行（picoruby 統合は実ホストビルドを含むため合計60秒程度）。
-3. main への統合方針を user 確認。
+1. picoruby-ot 側で spinel ローカルビルド〜 `suppify -t picoruby` での gem 再生成〜再ベンダリング（上記「その先」1-2）。
+2. ESP32 向けビルド（上記3）。実機転送・書き込みは user が実機接続を明言した場合のみ実施可（下記「制約」参照）。
+3. 実機で `NoMethodError` が解消していることを確認（上記4）。
+4. `otmeiwa.rb`/`otmeiwa_aot.rb` の交互切り替えでスループット計測、完了基準達成を確認（上記5）。
 
 ## 制約（厳守）
 
-- commit message は英語。Ruby のみ（No Python）。spinel 依存は外部ツール参照のみ（`tmp/spinel` は ephemeral、非 commit）。picoruby/picoruby には絶対 commit しない（ビルドは `MRUBY_BUILD_DIR` を temp に逃がす）。
-- push / PR / amend は user 承認必須。ローカル commit は autonomy あり。
+- commit message は英語。Ruby のみ（No Python）。spinel 依存は外部ツール参照のみ。
+- push / PR / amend は user 承認必須。ローカル commit は autonomy あり（origin が `bash0C7/*` の場合）。
+- picoruby-ot 側のビルド／転送は user が実機接続を明言した場合のみ Claude が実行してよい（前セッションで承認済み — "マイコンデバイスはUSB接続しているので、準備がととのったらbuildして転送してね"。ただし実機操作を伴う具体的な作業に着手する前には、この承認が今回のセッションでも有効か再確認すること）。
+- **merge は実機動作確認完了後のみ、提案も禁止**（`~/dev/src/CLAUDE.md` 規律）。
