@@ -1,7 +1,5 @@
 # test/test_cli.rb
 require "test_helper"
-require "suppify/cli"
-require "suppify/runtime_sources"
 require "fileutils"
 require "tmpdir"
 

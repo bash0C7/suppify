@@ -1,23 +1,11 @@
-# lib/suppify.rb
+# lib/suppify.rb — namespace, shared errors, and the four layer files:
+# core (Ruby+.rbs → neutral C), bindings (per-VM wrappers), package
+# (per-target artifact assembly), cli.
 module Suppify
   class Error < StandardError; end
   class NonNeutralType < Error; end
 end
-require "suppify/neutral_type"
-require "suppify/signature"
-require "suppify/symbol_map"
-require "suppify/visibility"
-require "suppify/trampoline"
-require "suppify/main_renamer"
-require "suppify/header"
-require "suppify/pipeline"
-require "suppify/spinel_runner"
-require "suppify/rbs_seed"
-require "suppify/root_injector"
-require "suppify/runtime_sources"
-require "suppify/binding/cruby"
-require "suppify/binding/mruby"
-require "suppify/emitter/cruby_gem"
-require "suppify/emitter/picoruby_gem"
-require "suppify/builder"
+require "suppify/core"
+require "suppify/bindings"
+require "suppify/package"
 require "suppify/cli"

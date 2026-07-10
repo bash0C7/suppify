@@ -1,13 +1,7 @@
 # lib/suppify/cli.rb
-require "suppify/spinel_runner"
-require "suppify/builder"
-require "suppify/pipeline"
-require "suppify/visibility"
-require "suppify/rbs_seed"
-require "suppify/root_injector"
-require "suppify/emitter/cruby_gem"
-require "suppify/emitter/picoruby_gem"
-require "suppify/runtime_sources"
+require "fileutils"
+require "suppify/core"
+require "suppify/package"
 
 module Suppify
   module CLI
@@ -79,7 +73,6 @@ module Suppify
 
     def run(argv)
       opts = parse(argv)
-      require "fileutils"
       tmp_dir = ".suppify-tmp"
       FileUtils.mkdir_p(tmp_dir)
       ruby_source = File.read(opts[:input])
@@ -107,8 +100,8 @@ module Suppify
     def emit_c(opts, result, emitted)
       File.write(emitted[:c_path], result[:c_source])
       File.write(File.join(opts[:out_dir], "#{opts[:lib_name]}.h"), result[:header])
-      built = Builder.new.build(c_path: emitted[:c_path],
-                                lib_name: opts[:lib_name], out_dir: opts[:out_dir])
+      built = Emitter::CArchive.new.build(c_path: emitted[:c_path],
+                                          lib_name: opts[:lib_name], out_dir: opts[:out_dir])
       $stdout.puts "wrote #{built[:archive]} and #{opts[:lib_name]}.h " \
                    "(#{result[:exports].length} exports)"
     end
@@ -147,12 +140,12 @@ module Suppify
     # visibility, so public methods (the very ones suppify must export) get
     # silently dropped from the generated C unless something calls them. This
     # writes a "rooted" copy of the source with one synthetic, RBS-typed call
-    # per public method appended, so spinel's reachability analysis keeps
-    # them. Returns [rooted_rb_path, rbs_dir_or_nil].
+    # per public method appended (see Source#rooted_source), so spinel's
+    # reachability analysis keeps them. Returns [rooted_rb_path, rbs_dir_or_nil].
     def root_and_seed(input_path, ruby_source, c_path)
       rooted_path = c_path.sub(/\.c\z/, ".rooted.rb")
-      public_methods = Visibility.public_methods(ruby_source)
-      if public_methods.empty?
+      source = Source.new(ruby_source)
+      if source.public_methods.empty?
         File.write(rooted_path, ruby_source)
         return [rooted_path, nil]
       end
@@ -160,11 +153,11 @@ module Suppify
       rbs_path = input_path.sub(/\.rb\z/, ".rbs")
       unless File.exist?(rbs_path)
         raise Error, "missing RBS sidecar #{rbs_path} (needed to type-export " \
-                     "public method(s): #{public_methods.join(', ')})"
+                     "public method(s): #{source.public_methods.join(', ')})"
       end
 
-      rbs_sigs = RbsSeed.parse(File.read(rbs_path))
-      File.write(rooted_path, RootInjector.inject(ruby_source, public_methods, rbs_sigs))
+      source = Source.new(ruby_source, rbs_source: File.read(rbs_path))
+      File.write(rooted_path, source.rooted_source)
       [rooted_path, File.dirname(File.expand_path(rbs_path))]
     end
   end
