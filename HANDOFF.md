@@ -1,22 +1,28 @@
 # HANDOFF — suppify / otmeiwa AOT パイロット
 
-状態: **実機フラッシュ待ち**。修正入りファームウェア（`R2P2-ESP32.elf`）はビルド・静的検証済み。
-残作業は「フラッシュ → 実機で `otmeiwa_aot.rb` が動くことの確認 → interpreted 版とのスループット計測」のみ。
-実機操作は user の接続明言が必要（下記「制約」）。
+状態: **実機確認・スループット計測 完了、演奏確認は未実施**。`otmeiwa_aot`・`otmeiwa`（interpreted）
+両方を実機フラッシュし、`NoMethodError` なしでフレームループ出力を確認、シリアルの frame/sec 実測も
+取得済み。残るのは sound_on ボタン操作を伴う実演奏確認（user の耳と手が必要）のみ。
 
-## ゴール（user 発言そのまま、未達成）
+## ゴール（user 発言そのまま）
 
 > 完了基準はAOT版で実際に演奏できること。現行版と交互に入れ替えてスループット計測できることね。
 
-## 再開手順
+## 実機確認結果
 
-1. user に実機（ESP32、USB）接続の明言をもらう。
-2. picoruby-ot で `rake flash` → `rake monitor` またはシリアル直読み。
-3. 確認事項: `NoMethodError` が出ない / `<D:…,AX:…,AY:…,AZ:…>` フレームがループ出力される /
-   ボタンで sound_on にした際 accel 値が意味を持つ。
-4. ベンチマーク: `APP=otmeiwa_aot rake build && rake flash` と `APP=otmeiwa rake build && rake flash`
-   を交互に行い、user の `/dev --debug` fps ツールで比較（シリアルの frame/sec 直数えも補助に可）。
-5. 完了基準達成の確認は user が行う。merge の話題は user から出るまで待つ。
+- 両バージョンとも `NoMethodError` なし。`<D:…,AX:…,AY:…,AZ:…>` フレームが継続ループ出力
+  （ボタン未操作時は AX/AY/AZ=0 で想定どおり）。
+- スループット実測（シリアル frame/sec、`<D:` 出現待ち後の10秒窓で計測、同一手法2回）:
+  - `otmeiwa_aot`（AOT版）: 約 20.1〜20.6 fps
+  - `otmeiwa`（interpreted版）: 約 20.0 fps
+  - 差はおよそ1〜3%で誤差範囲に近い。ループはネイティブ演算でなく固定 delay か I2C センサー読み取り
+    等で律速されていると見られる。AOT化による大幅な高速化は確認されなかった。
+
+## 残作業
+
+1. sound_on ボタンを押した状態での実演奏確認（AX/AY/AZ が意味を持つ値になり、音が鳴ること）。
+   ボタン操作と音の主観評価は user のみが行える。
+2. 完了基準達成の確認は user が行う。merge の話題は user から出るまで待つ。
 
 ## 動作の前提となる現在の仕組み（操作に必要な事実）
 
@@ -55,6 +61,34 @@ git diff --stat -- "$GEM"   # suppify/otmeiwa_core が無変更なら空
 
 spinel は `/tmp/otmeiwa-aot-spinel`（pin `9394f6e`、ビルド済み、ephemeral）。無ければ
 `native/otmeiwa_core/README.md` の手順で再構築。
+
+### シリアル出力の読み方（TTY 非対話環境）
+
+`rake monitor`（`idf.py monitor`）は標準入力が TTY であることを要求するため、非対話シェルからは
+`Error: Monitor requires standard input to be attached to TTY` で失敗する。代わりに pyserial で
+直接読む。macOS では serial port を開いた瞬間 DTR/RTS がデフォルトで assert され ESP32 が reset
+保持されたままになる個体があるため、open 前後で明示的に `dtr = False` / `rts = False` を設定する。
+
+```bash
+/Users/bash/.espressif/python_env/idf5.4_py3.12_env/bin/python - <<'PYEOF'
+import serial, time
+ser = serial.Serial()
+ser.port = '/dev/cu.usbserial-59525718F0'  # 実機ごとに変わる、ls /dev/cu.* で確認
+ser.baudrate = 115200
+ser.timeout = 1
+ser.dtr = False
+ser.rts = False
+ser.open()
+ser.dtr = False
+ser.rts = False
+end = time.time() + 20
+while time.time() < end:
+    data = ser.read(4096)
+    if data:
+        import sys; sys.stdout.buffer.write(data); sys.stdout.flush()
+ser.close()
+PYEOF
+```
 
 ## 静的検証済み事項（実機なしで確認できる範囲は完了）
 
