@@ -20,15 +20,20 @@ module Suppify
   module RuntimeSources
     module_function
 
-    # The .c files archived into libspinel_rt.a (spinel Makefile), relative to
-    # spinel's lib/ dir. Kept explicit rather than globbed so an unexpected
-    # extra .c in a future spinel doesn't silently get pulled in.
+    # The .c files archived into libspinel_rt.a (spinel Makefile's RT_MEMBERS +
+    # the regexp objects), relative to spinel's lib/ dir. Kept explicit rather
+    # than globbed so an unexpected extra .c in a future spinel doesn't silently
+    # get pulled in. spinel's optional extension packages (json, stringio,
+    # strscan, base64) live under packages/*, are NOT part of libspinel_rt.a, and
+    # aren't needed by suppify's scalar-only exports, so they're intentionally
+    # excluded here.
     SOURCES = %w[
       regexp/re_compile.c regexp/re_exec.c regexp/re_utf8.c
-      sp_bigint.c sp_crypto.c sp_pack.c sp_strscan.c sp_time.c
-      sp_core.c sp_net.c sp_system.c sp_gc.c sp_alloc.c sp_json.c
-      sp_marshal.c sp_format.c sp_stringio.c sp_string.c sp_inspect.c
+      sp_bigint.c sp_crypto.c sp_pack.c sp_time.c
+      sp_core.c sp_net.c sp_system.c sp_gc.c sp_alloc.c
+      sp_marshal.c sp_format.c sp_string.c sp_inspect.c
       sp_array.c sp_str.c sp_re.c sp_fiber.c sp_sched.c sp_io.c
+      sp_cold.c
     ].freeze
 
     def copy_flat(lib_dir, dest_dir)
