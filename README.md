@@ -34,8 +34,13 @@ spinel is discovered like `cc` would be — not vendored, not a git
 dependency:
 
 - binary: `PATH`, or the `SPINEL` env var
-- runtime (`sp_runtime.h` / `libspinel_rt.a`): the `SPINEL_LIB` env var
+- runtime (`spinel_rt.h` / `libspinel_rt.a`): the `SPINEL_LIB` env var
   (defaults to empty, i.e. current directory)
+
+suppify targets exactly the spinel commit recorded in `spinel.pin` at the repo
+root — never a range of versions. `rake spinel:latest` / `spinel:check_pin` /
+`spinel:bump_pin` track and advance that pin; see the `spinel-tracking` skill
+(`.claude/skills/spinel-tracking/`).
 
 ## Usage
 
@@ -531,3 +536,9 @@ pass — only when their prerequisites are present, otherwise they're skipped
 - `test_picoruby_target_integration.rb` — additionally needs a local picoruby
   checkout (`PICORUBY_ROOT`, default `~/dev/src/github.com/picoruby/picoruby`);
   it runs a full picoruby host build linking the generated mrbgem.
+
+```sh
+rake spinel:latest              # matz/spinel's current upstream master SHA
+rake spinel:check_pin[<ref>]    # verify a spinel ref (default: spinel.pin); clones + builds it + runs this suite against it
+rake spinel:bump_pin[<ref>]     # check_pin[<ref>], and only on success, write spinel.pin
+```

@@ -15,8 +15,13 @@ suppify = spinel が出力した native コードを、呼び出し可能・組�
 - **コミットメッセージは英語で書く**（本文・subject ともに）。
 - **実装は Ruby**（No Python）。
 - **spinel への依存は「外部ツール参照」に限る** — git submodule / vendoring / subtree は禁止。
-  spinel バイナリと `lib/`（`sp_runtime.h` / `libspinel_rt.a`）は PATH / 環境変数 /
+  spinel バイナリと `lib/`（`spinel_rt.h` / `libspinel_rt.a`）は PATH / 環境変数 /
   `--spinel-bin` `--spinel-lib` で発見する（`cc` を呼ぶのと同じ扱い）。
   spinel ソースは CI / テスト時の **ephemeral な pinned clone**（gitignore した tmp）でのみ用意する。
 - **生成物は自己完結させる** — 出力バンドルは `lib<name>.a` + コピーした `libspinel_rt.a`
   + 中立 header。consumer 側は spinel インストール不要。
+- **spinelは常に1コミットへpinする**（`spinel.pin`）。追従は`spinel:latest`/`spinel:check_pin`/
+  `spinel:bump_pin`（`rakelib/spinel.rake`）で行う — `check_pin`は検証のみ、`bump_pin`は
+  検証green時のみ`spinel.pin`を書く。手順は`spinel-tracking` skill
+  （`.claude/skills/spinel-tracking/`）に従う。downstream consumer(R2P2-darwin等)への
+  pin伝播はconsumer側の責務で、本repoはsuppify自身のpinのみ管理する。
