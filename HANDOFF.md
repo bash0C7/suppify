@@ -1,4 +1,35 @@
-# HANDOFF — suppify / otmeiwa AOT パイロット
+# HANDOFF — suppify
+
+## spinel pin 更新（完了）
+
+状態: **完了**。`spinel.pin` を `e52019d6`（2026-07-19）から `d0feb620`（2026-09-14, upstream
+master HEAD）へ更新し、`rake spinel:check_pin[d0feb620...]` が実 spinel クローン+ビルド+picoruby
+実リンクまで含めて 100% green（129 tests, 326 assertions, 0 failures/errors）。
+
+見つかった実差分（すべて修正済み、コミット済み）:
+
+- **ランタイムヘッダのリネーム**: `sp_runtime.h` → `spinel_rt.h`。`lib/suppify/package.rb` の
+  `SymbolPrefix::DISCOVERY_STUB` と全テストフィクスチャを追従。
+- **公開関数シグネチャの型名変更**: spinel の生成 C が `mrb_int`/`mrb_float`/`mrb_bool` でなく
+  `sp_int`/`sp_float`/`sp_bool` を返すようになった（spinel の self-host 化に伴う独自命名への移行と
+  見られる）。`lib/suppify/core.rb` の `NeutralType::TABLE` を追従。`lib/suppify/bindings.rb` の
+  同名文字列は無関係（mruby VM 側 API の型名で、意図的に変更していない）。
+- **`RT_MEMBERS` の増加**: upstream が `sp_slab sp_dtoa sp_hash sp_proc sp_exc sp_random
+  sp_process sp_process_status` の 8 ファイルを追加。`lib/suppify/package.rb` の
+  `RuntimeSources::SOURCES`（23→31 件）を追従。
+- **`test/test_picoruby_target_integration.rb` の別件バグ（spinel と無関係）**: picoruby 本体の
+  `conf.picoruby` が `alloc_estalloc: true` を既定にした（`picoruby-machine` の estalloc 実装が
+  前提）ため、`picoruby-machine` を含まないこのテストの最小 host build がリンクエラーになった。
+  `conf.picoruby(alloc_estalloc: false)` で回避（このテストは AOT gem のリンク確認が目的で
+  estalloc は無関係）。
+
+**継続方針**: 本 repo は spinel を 1 コミットに pin する運用（`--spinel-bin`/`SPINEL_LIB` で外部
+発見するだけで vendoring しない）なので、上流の型名リネームや RT_MEMBERS 変更は無警告で
+`spinel:check_pin` のテスト失敗として現れる。今後追随する時も同じ手順（`rake
+spinel:check_pin[<新ref>]` を実行 → 落ちたテストの実際の生成 C を読んで差分の正体を特定 → 該当
+箇所のみ最小修正）で足りる。
+
+## HANDOFF — suppify / otmeiwa AOT パイロット
 
 状態: **実機確認・スループット計測 完了、演奏確認は未実施**。`otmeiwa_aot`・`otmeiwa`（interpreted）
 両方を実機フラッシュし、`NoMethodError` なしでフレームループ出力を確認、シリアルの frame/sec 実測も

@@ -11,7 +11,7 @@ class TestRuntimeSources < Test::Unit::TestCase
     assert_includes s, "sp_gc.c"
     assert_includes s, "sp_str.c"
     assert_includes s, "regexp/re_compile.c"
-    assert_equal 23, s.length
+    assert_equal 31, s.length
   end
 
   # copy_flat flattens every runtime .c and every header into one dir (so a
@@ -22,7 +22,7 @@ class TestRuntimeSources < Test::Unit::TestCase
       lib = File.join(root, "lib")
       FileUtils.mkdir_p(File.join(lib, "regexp"))
       Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-      File.write(File.join(lib, "sp_runtime.h"), "/* h */")
+      File.write(File.join(lib, "spinel_rt.h"), "/* h */")
       File.write(File.join(lib, "regexp", "re_internal.h"), "/* h */")
 
       dest = File.join(root, "out")
@@ -33,7 +33,7 @@ class TestRuntimeSources < Test::Unit::TestCase
       assert_includes result[:sources], "re_compile.c" # flattened, no regexp/ prefix
       assert File.exist?(File.join(dest, "sp_gc.c"))
       assert File.exist?(File.join(dest, "re_compile.c"))
-      assert File.exist?(File.join(dest, "sp_runtime.h"))
+      assert File.exist?(File.join(dest, "spinel_rt.h"))
     end
   end
 
@@ -90,7 +90,7 @@ class TestSymbolPrefix < Test::Unit::TestCase
     refute_includes symbols, "sp__main"
   end
 
-  # sp_runtime.h -- the header the GENERATED per-program TU includes, not one
+  # spinel_rt.h -- the header the GENERATED per-program TU includes, not one
   # of the 25 lib/*.c sources -- embeds ~200 non-static function bodies
   # directly (spinel's normal build compiles it into exactly one program TU
   # per binary). Every suppify library's own generated .c also includes it,
@@ -192,15 +192,15 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
     lib = File.join(root, "spinel_lib")
     FileUtils.mkdir_p(File.join(lib, "regexp"))
     Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-    File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+    File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
 
     out = File.join(root, "gem")
     Suppify::Emitter::CRubyGem.emit(
       lib_name: "addlib",
-      c_source: "#include \"sp_runtime.h\"\nstatic int sp__main(int a, char**b){return 0;}\n",
+      c_source: "#include \"spinel_rt.h\"\nstatic int sp__main(int a, char**b){return 0;}\n",
       header: "#ifndef ADDLIB_H\n#define ADDLIB_H\nintptr_t add(intptr_t, intptr_t);\n#endif\n",
       exports: [{ "public" => "add", "cname" => "sp_add",
-                  "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) }],
+                  "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) }],
       spinel_lib: lib,
       out_dir: out,
       discover_symbols: ->(_lib) { %w[sp_gc_alloc] },
@@ -219,7 +219,7 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
       assert File.exist?(File.join(ext, "addlib.h"))
       assert File.exist?(File.join(ext, "sp_gc.c"))       # runtime source bundled
       assert File.exist?(File.join(ext, "re_compile.c"))  # regexp source flattened
-      assert File.exist?(File.join(ext, "sp_runtime.h"))  # runtime header bundled
+      assert File.exist?(File.join(ext, "spinel_rt.h"))  # runtime header bundled
     end
   end
 
@@ -262,7 +262,7 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
       lib = File.join(root, "spinel_lib")
       FileUtils.mkdir_p(File.join(lib, "regexp"))
       Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
       out = File.join(root, "gem")
 
       Suppify::Emitter::CRubyGem.emit(
@@ -286,7 +286,7 @@ class TestEmitterCRubyGem < Test::Unit::TestCase
       lib = File.join(root, "spinel_lib")
       FileUtils.mkdir_p(File.join(lib, "regexp"))
       Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
       out = File.join(root, "gem")
 
       malicious = %(1.0"; system("touch #{root}/pwned"); s.summary = ")
@@ -330,15 +330,15 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
     lib = File.join(root, "spinel_lib")
     FileUtils.mkdir_p(File.join(lib, "regexp"))
     Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-    File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+    File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
 
     out = File.join(root, "picoruby-addlib")
     Suppify::Emitter::PicoRubyGem.emit(
       lib_name: "addlib",
-      c_source: "#include \"sp_runtime.h\"\nstatic int sp__main(int a, char**b){return 0;}\n",
+      c_source: "#include \"spinel_rt.h\"\nstatic int sp__main(int a, char**b){return 0;}\n",
       header: "#ifndef ADDLIB_H\n#define ADDLIB_H\nintptr_t add(intptr_t, intptr_t);\n#endif\n",
       exports: [{ "public" => "add", "cname" => "sp_add",
-                  "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) }],
+                  "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) }],
       spinel_lib: lib,
       out_dir: out,
       discover_symbols: ->(_lib) { %w[sp_gc_alloc] },
@@ -355,7 +355,7 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       assert File.exist?(File.join(out, "src", "addlib_gen.c"))
       assert File.exist?(File.join(out, "src", "sp_gc.c"))      # runtime bundled into src/
       assert File.exist?(File.join(out, "src", "re_compile.c")) # regexp flattened
-      assert File.exist?(File.join(out, "src", "sp_runtime.h"))
+      assert File.exist?(File.join(out, "src", "spinel_rt.h"))
     end
   end
 
@@ -376,7 +376,7 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       lib = File.join(root, "spinel_lib")
       FileUtils.mkdir_p(File.join(lib, "regexp"))
       Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
       out = File.join(root, "picoruby-addlib")
 
       Suppify::Emitter::PicoRubyGem.emit(
@@ -399,7 +399,7 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       lib = File.join(root, "spinel_lib")
       FileUtils.mkdir_p(File.join(lib, "regexp"))
       Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
-      File.write(File.join(lib, "sp_runtime.h"), "/* rt */")
+      File.write(File.join(lib, "spinel_rt.h"), "/* rt */")
       out = File.join(root, "picoruby-addlib")
 
       malicious = %(1.0"; system("touch #{root}/pwned"); spec.summary = ")

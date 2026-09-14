@@ -17,13 +17,13 @@ module Suppify
   # Anything not in the table is non-neutral and raises.
   module NeutralType
     TABLE = {
-      "mrb_int"       => "intptr_t",
+      "sp_int"        => "intptr_t",
       "double"        => "double",
-      "mrb_float"     => "double",
+      "sp_float"      => "double",
       "const char *"  => "const char *",
       "bool"          => "int",
       "_Bool"         => "int",
-      "mrb_bool"      => "int",
+      "sp_bool"       => "int",
       "void"          => "void",
     }.freeze
 

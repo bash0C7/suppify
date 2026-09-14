@@ -30,10 +30,11 @@ module Suppify
     SOURCES = %w[
       regexp/re_compile.c regexp/re_exec.c regexp/re_utf8.c
       sp_bigint.c sp_crypto.c sp_pack.c sp_time.c
-      sp_core.c sp_net.c sp_system.c sp_gc.c sp_alloc.c
-      sp_marshal.c sp_format.c sp_string.c sp_inspect.c
-      sp_array.c sp_str.c sp_re.c sp_fiber.c sp_sched.c sp_io.c
-      sp_cold.c
+      sp_core.c sp_net.c sp_system.c sp_gc.c sp_alloc.c sp_slab.c
+      sp_marshal.c sp_format.c sp_string.c sp_inspect.c sp_dtoa.c
+      sp_array.c sp_str.c sp_hash.c sp_proc.c sp_exc.c sp_random.c
+      sp_re.c sp_fiber.c sp_sched.c sp_io.c sp_process.c
+      sp_process_status.c sp_cold.c
     ].freeze
 
     def copy_flat(lib_dir, dest_dir)
@@ -81,8 +82,8 @@ module Suppify
     # shared (unrenamed) is safe; it's the one runtime symbol excluded here.
     EXCLUDED = %w[sp_ctx_swap].freeze
 
-    # sp_runtime.h -- included only by each generated program's own TU, not
-    # by any of the 25 lib/*.c sources -- embeds ~200 non-static function
+    # spinel_rt.h -- included only by each generated program's own TU, not
+    # by any of the lib/*.c sources -- embeds ~200 non-static function
     # bodies directly (spinel's normal build compiles it into exactly one
     # program TU per binary). Every suppify library's generated .c includes
     # it too, so scanning only lib/*.c misses these entirely, leaving them
@@ -91,7 +92,7 @@ module Suppify
     # lookups spinel expects the program itself to define, always static
     # there) so compiling it surfaces the header-embedded symbols too.
     DISCOVERY_STUB = <<~C
-      #include "sp_runtime.h"
+      #include "spinel_rt.h"
       static const char *sp_sym_to_s(sp_sym id) { (void)id; return ""; }
       static sp_sym sp_sym_intern(const char *s) { (void)s; return (sp_sym)0; }
       static const char *sp_class_to_s(sp_Class c) { (void)c; return ""; }

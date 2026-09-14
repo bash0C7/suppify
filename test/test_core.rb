@@ -5,16 +5,16 @@ require "test_helper"
 class TestNeutralType < Test::Unit::TestCase
   def map(t) = Suppify::NeutralType.map(t)
 
-  def test_mrb_int_to_intptr
-    assert_equal "intptr_t", map("mrb_int")
+  def test_sp_int_to_intptr
+    assert_equal "intptr_t", map("sp_int")
   end
 
   def test_double_passthrough
     assert_equal "double", map("double")
   end
 
-  def test_mrb_float_to_double
-    assert_equal "double", map("mrb_float")
+  def test_sp_float_to_double
+    assert_equal "double", map("sp_float")
   end
 
   def test_const_char_ptr_passthrough
@@ -24,7 +24,7 @@ class TestNeutralType < Test::Unit::TestCase
   def test_bool_to_int
     assert_equal "int", map("bool")
     assert_equal "int", map("_Bool")
-    assert_equal "int", map("mrb_bool")
+    assert_equal "int", map("sp_bool")
   end
 
   def test_void_passthrough
@@ -39,12 +39,12 @@ class TestNeutralType < Test::Unit::TestCase
   # kind classifies a (spinel or neutral) C type into a language-agnostic
   # marshalling category the per-target bindings switch on.
   def test_kind_classifies_scalars
-    assert_equal :int,    Suppify::NeutralType.kind("mrb_int")
+    assert_equal :int,    Suppify::NeutralType.kind("sp_int")
     assert_equal :int,    Suppify::NeutralType.kind("intptr_t")
-    assert_equal :float,  Suppify::NeutralType.kind("mrb_float")
+    assert_equal :float,  Suppify::NeutralType.kind("sp_float")
     assert_equal :float,  Suppify::NeutralType.kind("double")
     assert_equal :string, Suppify::NeutralType.kind("const char *")
-    assert_equal :bool,   Suppify::NeutralType.kind("mrb_bool")
+    assert_equal :bool,   Suppify::NeutralType.kind("sp_bool")
     assert_equal :bool,   Suppify::NeutralType.kind("bool")
     assert_equal :void,   Suppify::NeutralType.kind("void")
   end
@@ -56,7 +56,7 @@ end
 
 class TestSignature < Test::Unit::TestCase
   C = <<~C
-    static mrb_int sp_add(mrb_int a, mrb_int b) {
+    static sp_int sp_add(sp_int a, sp_int b) {
       return a + b;
     }
     static const char *sp_greet(const char *name) {
@@ -67,8 +67,8 @@ class TestSignature < Test::Unit::TestCase
 
   def test_extract_scalar_two_args
     sig = Suppify::SignatureExtractor.extract(C, "sp_add")
-    assert_equal "mrb_int", sig.return_type
-    assert_equal [["mrb_int", "a"], ["mrb_int", "b"]], sig.params
+    assert_equal "sp_int", sig.return_type
+    assert_equal [["sp_int", "a"], ["sp_int", "b"]], sig.params
   end
 
   def test_extract_pointer_return_and_arg
@@ -224,11 +224,11 @@ class TestPipeline < Test::Unit::TestCase
   RUBY
 
   C = <<~C
-    static mrb_int sp_add(mrb_int a, mrb_int b) { return a + b; }
+    static sp_int sp_add(sp_int a, sp_int b) { return a + b; }
     static void sp_boom(void) { }
     static const char *sp_greet(const char *name) { return name; }
     static const char *sp_cat(const char *a, const char *b) { return a; }
-    static mrb_int sp_helper(mrb_int x) { return x; }
+    static sp_int sp_helper(sp_int x) { return x; }
     int main(int argc, char **argv) { return 0; }
   C
 
@@ -261,7 +261,7 @@ class TestPipeline < Test::Unit::TestCase
 
   def test_private_method_not_exported_but_still_static_in_c
     assert_no_match(/intptr_t helper\(/, @c)   # not a public trampoline
-    assert_match(/static mrb_int sp_helper/, @c) # still present + hidden
+    assert_match(/static sp_int sp_helper/, @c) # still present + hidden
   end
 
   def test_public_method_with_non_neutral_signature_raises
@@ -428,7 +428,7 @@ class TestPipeline < Test::Unit::TestCase
 
   def test_header_prototypes_are_neutral_no_spinel_types
     assert_match(/intptr_t add\(intptr_t a, intptr_t b\);/, @h)
-    assert_no_match(/mrb_int/, @h)
+    assert_no_match(/sp_int/, @h)
   end
 
   # Per-library names (not generic ones) so two suppify libraries linked into

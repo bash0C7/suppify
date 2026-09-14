@@ -77,13 +77,15 @@ class TestPicoRubyTargetIntegration < Test::Unit::TestCase
         conf.toolchain :gcc
         conf.cc.defines << "MRB_TICK_UNIT=4"
         conf.cc.defines << "MRB_TIMESLICE_TICK_COUNT=3"
-        conf.cc.defines << "PICORB_ALLOC_ALIGN=8"
-        conf.cc.defines << "PICORB_ALLOC_ESTALLOC"
         conf.cc.defines << "PICORB_PLATFORM_POSIX"
         conf.cc.defines << "MRB_INT64"
         conf.cc.defines << "MRB_NO_BOXING"
         conf.cc.defines << "MRB_UTF8_STRING"
-        conf.picoruby
+        # alloc_estalloc: false -- this integration test only needs the
+        # standard allocator; picoruby's default (alloc_estalloc: true)
+        # expects picoruby-machine's estalloc sources, which this minimal
+        # host build doesn't pull in.
+        conf.picoruby(alloc_estalloc: false)
         conf.gembox "minimum"
         conf.gem core: "picoruby-bin-picoruby"
         conf.gem gemdir: #{gem_dir.inspect}

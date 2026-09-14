@@ -6,15 +6,15 @@ class TestBindingCRuby < Test::Unit::TestCase
   def setup
     @exports = [
       { "public" => "add",   "cname" => "sp_add",
-        "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) },
+        "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) },
       { "public" => "half",  "cname" => "sp_half",
-        "sig" => Suppify::Signature.new("mrb_float", [["mrb_float", "x"]]) },
+        "sig" => Suppify::Signature.new("sp_float", [["sp_float", "x"]]) },
       { "public" => "greet", "cname" => "sp_greet",
         "sig" => Suppify::Signature.new("const char *", [["const char *", "name"]]) },
       { "public" => "even",  "cname" => "sp_even",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_int", "n"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_int", "n"]]) },
       { "public" => "truthy", "cname" => "sp_truthy",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_bool", "flag"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_bool", "flag"]]) },
       { "public" => "boom",  "cname" => "sp_boom",
         "sig" => Suppify::Signature.new("void", []) },
     ]
@@ -75,15 +75,15 @@ class TestBindingMruby < Test::Unit::TestCase
   def setup
     @exports = [
       { "public" => "add",   "cname" => "sp_add",
-        "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) },
+        "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) },
       { "public" => "half",  "cname" => "sp_half",
-        "sig" => Suppify::Signature.new("mrb_float", [["mrb_float", "x"]]) },
+        "sig" => Suppify::Signature.new("sp_float", [["sp_float", "x"]]) },
       { "public" => "greet", "cname" => "sp_greet",
         "sig" => Suppify::Signature.new("const char *", [["const char *", "name"]]) },
       { "public" => "even",  "cname" => "sp_even",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_int", "n"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_int", "n"]]) },
       { "public" => "truthy", "cname" => "sp_truthy",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_bool", "flag"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_bool", "flag"]]) },
       { "public" => "boom",  "cname" => "sp_boom",
         "sig" => Suppify::Signature.new("void", []) },
     ]
@@ -156,15 +156,15 @@ class TestBindingMrubyc < Test::Unit::TestCase
   def setup
     @exports = [
       { "public" => "add",   "cname" => "sp_add",
-        "sig" => Suppify::Signature.new("mrb_int", [["mrb_int", "a"], ["mrb_int", "b"]]) },
+        "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) },
       { "public" => "half",  "cname" => "sp_half",
-        "sig" => Suppify::Signature.new("mrb_float", [["mrb_float", "x"]]) },
+        "sig" => Suppify::Signature.new("sp_float", [["sp_float", "x"]]) },
       { "public" => "greet", "cname" => "sp_greet",
         "sig" => Suppify::Signature.new("const char *", [["const char *", "name"]]) },
       { "public" => "even",  "cname" => "sp_even",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_int", "n"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_int", "n"]]) },
       { "public" => "truthy", "cname" => "sp_truthy",
-        "sig" => Suppify::Signature.new("mrb_bool", [["mrb_bool", "flag"]]) },
+        "sig" => Suppify::Signature.new("sp_bool", [["sp_bool", "flag"]]) },
       { "public" => "boom",  "cname" => "sp_boom",
         "sig" => Suppify::Signature.new("void", []) },
     ]
