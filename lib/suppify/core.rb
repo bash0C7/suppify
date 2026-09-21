@@ -195,15 +195,16 @@ module Suppify
 
   Signature = Struct.new(:return_type, :params) # params: [[c_type, name], ...]
 
-  # Extracts a function's C signature from generated C text by its cname.
-  # Generated definitions are regular: `[static ]<ret> <cname>(<params>) {`.
+  # Extracts a function's C signature by its cname from spinel's --ext-init
+  # header, where every entry is declared `<ret> <cname>(<params>);` (a
+  # definition line `... {` in generated C is accepted too).
   module SignatureExtractor
     module_function
 
     def extract(c_source, cname)
       # Match the definition line: capture return type (everything before the
       # cname) and the parenthesized parameter list.
-      re = /(?<ret>[A-Za-z_][\w \*]*?)\s*\b#{Regexp.escape(cname)}\s*\((?<params>[^)]*)\)\s*\{/
+      re = /(?<ret>[A-Za-z_][\w \*]*?)\s*\b#{Regexp.escape(cname)}\s*\((?<params>[^)]*)\)\s*[{;]/
       m = c_source.match(re)
       raise Error, "definition not found for #{cname}" unless m
       # Drop the storage/inline specifiers spinel puts in front of the type
@@ -235,14 +236,9 @@ module Suppify
   # Rooting exists because spinel's whole-program reachability analysis DCEs
   # any top-level method with no call site, regardless of visibility --
   # fatal for suppify's premise (public methods are exported precisely
-  # because nothing in the program calls them). #rooted_source appends one
-  # synthetic, RBS-typed call per public method so spinel's analyzer keeps
-  # it and infers a concrete signature. `sp_lib_init` (see Pipeline's
-  # lib_init) runs the renamed `main` once at load time, so the synthetic
-  # calls must never actually execute -- `cr_collect_calls` (spinel's
-  # reachability walk) registers call names syntactically regardless of
-  # surrounding control flow, so wrapping them in `if false` keeps them
-  # reachable-for-typing but dead at runtime.
+  # because nothing in the program calls them). #rooted_source appends a
+  # wrapper module (see Source.wrapper_module) whose --ext-entry exports delegate
+  # to each public method, which roots it and gives spinel its signature.
   #
   # The RBS subset parsed here is what suppify needs to type spinel's
   # top-level exports: `class Object ... def name: (T1, T2) -> R ... end`
@@ -278,9 +274,10 @@ module Suppify
     # read; anything else in an `@rbs` comment is left alone.
     INLINE_RBS_TAG_RE = /\A#\s*@rbs\s+([A-Za-z_]\w*[?!]?)\s*:\s*(.+?)\s*\z/
 
-    def initialize(ruby_source, rbs_source: nil)
+    def initialize(ruby_source, rbs_source: nil, lib_name: nil)
       @ruby_source = ruby_source
       @rbs_source = rbs_source
+      @lib_name = lib_name
     end
 
     # Public top-level method names, in definition order. Handles: bare
@@ -342,14 +339,58 @@ module Suppify
       "class Object\n#{lines.join("\n")}\nend\n"
     end
 
+    # The module spinel's --ext-entry exports from: one `def self.suppi_<m>`
+    # per public top-level method, delegating to it. spinel's --ext-entry
+    # accepts only `Module.method` names (verified against 4a28d45: a
+    # top-level name is refused), so suppify wraps rather than rewrites --
+    # the user's file is untouched and still runs unmodified under CRuby.
+    # The wrapper is also what roots each method: spinel DCEs a top-level
+    # method nothing calls, but an --ext-entry export is a root. The RBS seed
+    # alone does not type every parameter (a Hash[Integer, Integer] parameter
+    # stays sp_RbVal), so a dead, literal-typed call to each wrapper entry
+    # stays, as before, to give spinel a call-site type.
+    WRAPPER_PREFIX = "suppi_"
+
+    # Per-library, because spinel emits each entry as the external symbol
+    # sp_<Module>_s_<method>: a shared module name would collide when two
+    # suppify libraries are linked into one binary.
+    def self.wrapper_module(lib_name)
+      lib_name ? "SuppiExport_#{lib_name}" : "SuppiExport"
+    end
+
+    def wrapper_module = self.class.wrapper_module(@lib_name)
+
     # The Ruby source spinel compiles: unchanged when nothing is exported,
-    # otherwise the original plus the dead-but-visible root-call block.
+    # otherwise the original plus the wrapper module and its dead root calls.
     def rooted_source
       return @ruby_source if public_methods.empty?
 
       require_signatures!
+      defs = public_methods.map do |m|
+        ps = (0...signatures[m][:params].length).map { |i| "p#{i}" }.join(", ")
+        "  def self.#{WRAPPER_PREFIX}#{m}(#{ps})\n    #{m}(#{ps})\n  end"
+      end
       calls = public_methods.map { |m| root_call(m, signatures[m]) }
-      @ruby_source + "\nif false\n" + calls.map { |c| "  #{c}" }.join("\n") + "\nend\n"
+      "#{@ruby_source}\nmodule #{wrapper_module}\n#{defs.join("\n")}\nend\n" \
+        "if false\n#{calls.map { |c| "  #{c}" }.join("\n")}\nend\n"
+    end
+
+    # `Module.method` names for spinel's --ext-entry, in export order.
+    def ext_entries
+      public_methods.map { |m| "#{wrapper_module}.#{WRAPPER_PREFIX}#{m}" }
+    end
+
+    # The RBS the wrapper module needs: spinel types an exported method's
+    # parameters from the seed, and the wrapper's own signature is what the
+    # emitted header states. Empty when nothing is exported.
+    def wrapper_rbs_text
+      return nil if public_methods.empty?
+      require_signatures!
+      lines = public_methods.map do |m|
+        sig = signatures[m]
+        "  def self.#{WRAPPER_PREFIX}#{m}: (#{sig[:params].join(', ')}) -> #{sig[:ret]}"
+      end
+      "module #{wrapper_module}\n#{lines.join("\n")}\nend\n"
     end
 
     private
@@ -360,6 +401,30 @@ module Suppify
       raise Error, "no RBS signature for public method(s): #{missing.join(', ')} " \
                    "(add an inline `#: (...) -> ...` comment above the def, or declare it " \
                    "under `class Object` in the sidecar .rbs)"
+    end
+
+    def root_call(name, sig)
+      args = sig[:params].map { |t| literal_for(t) }
+      "#{wrapper_module}.#{WRAPPER_PREFIX}#{name}(#{args.join(", ")})"
+    end
+
+    # A literal of the declared type for the synthetic root call. Containers
+    # are built recursively; an Array literal is empty because the element
+    # type comes from the --rbs seed, and a non-empty literal whose element
+    # type is narrower than the declared one (e.g. [0] for Array[untyped])
+    # makes spinel reject the call as contradicting the seed.
+    def literal_for(type)
+      case type.kind
+      when :simple
+        LITERALS.fetch(type.name) do
+          raise Error, "RBS type not supported for root-call synthesis: #{type} " \
+                       "(spinel has no value of this type to seed the export with)"
+        end
+      when :array    then "[]"
+      when :tuple    then "[#{type.args.map { |t| literal_for(t) }.join(', ')}]"
+      when :hash     then "{ #{literal_for(type.args[0])} => #{literal_for(type.args[1])} }"
+      when :optional then literal_for(type.args[0])
+      end
     end
 
     def handle_call(node, mode_setter:, vis:, order:)
@@ -469,39 +534,19 @@ module Suppify
       block
     end
 
-    def root_call(name, sig)
-      args = sig[:params].map { |t| literal_for(t) }
-      "#{name}(#{args.join(", ")})"
-    end
-
-    # A literal of the declared type for the synthetic root call. Containers
-    # are built recursively; an Array literal is empty because the element
-    # type comes from the --rbs seed, and a non-empty literal whose element
-    # type is narrower than the declared one (e.g. [0] for Array[untyped])
-    # makes spinel reject the call as contradicting the seed.
-    def literal_for(type)
-      case type.kind
-      when :simple
-        LITERALS.fetch(type.name) do
-          raise Error, "RBS type not supported for root-call synthesis: #{type} " \
-                       "(spinel has no value of this type to seed the export with)"
-        end
-      when :array    then "[]"
-      when :tuple    then "[#{type.args.map { |t| literal_for(t) }.join(', ')}]"
-      when :hash     then "{ #{literal_for(type.args[0])} => #{literal_for(type.args[1])} }"
-      when :optional then literal_for(type.args[0])
-      end
-    end
   end
 
   class SpinelRunner
     # runner: callable(argv_array) -> [stdout_string, exit_status_int]
     # rbs_dir: directory of *.rbs sidecars fed to spinel's --rbs (advisory
     # type seeding; see Source#rooted_source for why suppify needs this).
-    def initialize(spinel_bin: ENV["SPINEL"] || "spinel", runner: method(:shell), rbs_dir: nil)
+    def initialize(spinel_bin: ENV["SPINEL"] || "spinel", runner: method(:shell), rbs_dir: nil,
+                   ext_init: nil, ext_entries: [])
       @spinel_bin = spinel_bin
       @runner = runner
       @rbs_dir = rbs_dir
+      @ext_init = ext_init
+      @ext_entries = ext_entries
     end
 
     # Real spinel treats `-c` and `--emit-symbol-map` as mutually exclusive
@@ -510,9 +555,14 @@ module Suppify
     def emit(rb_path, c_path)
       symbols_path = c_path.sub(/\.c\z/, "") + ".symbols.json"
       rbs_args = @rbs_dir ? ["--rbs", @rbs_dir] : []
-      run!([@spinel_bin, rb_path, *rbs_args, "-c", "-o", c_path])
+      # --ext-init emits a main-less library TU plus its header (<out>.h)
+      # stating init, the try-frame wrapper and each entry's C signature.
+      ext_args = []
+      ext_args += ["--ext-init", @ext_init] if @ext_init
+      ext_args += ["--ext-entry", @ext_entries.join(",")] unless @ext_entries.empty?
+      run!([@spinel_bin, rb_path, *rbs_args, *ext_args, "-c", "-o", c_path])
       run!([@spinel_bin, rb_path, "--emit-symbol-map", "-o", symbols_path])
-      { c_path: c_path, symbols_path: symbols_path }
+      { c_path: c_path, symbols_path: symbols_path, header_path: c_path.sub(/\.c\z/, ".h") }
     end
 
     # Default runner: array-form argv, no shell involved.
@@ -900,25 +950,26 @@ module Suppify
       b
     end
 
-    # The same setjmp barrier the scalar trampolines use: SP_GC_ROOT's
-    # cleanup attribute never runs across a longjmp, so the root count is
-    # snapshotted here and restored on the caught-exception path (on a
-    # normal return the cleanups pop it themselves -- restoring there too
-    # would pop twice).
+    # The per-call exception barrier is spinel's own <kernel>_try frame (the
+    # emitted --ext-init contract): the thunk runs the body, the wrapper
+    # turns a caught raise into SUPPI_ERAISE via suppi__capture.
     def call_wrapper(name)
+      try = "#{Suppify.kernel_init_name(@lib_name)}_try"
       <<~C
+
+        static void suppi_thunk_#{name}(void *p) {
+            suppi_call_ctx *c = (suppi_call_ctx *)p; suppi_rd r; suppi_wr w;
+            r.p = c->in; r.e = c->in + c->in_len;
+            w.b = c->out; w.p = c->out; w.e = c->out ? c->out + c->out_cap : c->out; w.ovf = 0;
+            c->rc = suppi_body_#{name}(&r, &w);
+        }
         int32_t #{@lib_name}_#{name}_call(const uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-            suppi_rd r; suppi_wr w; jmp_buf jb; int32_t rc; int sp_root_base;
+            suppi_call_ctx c; const char *cls, *msg;
             g_suppi_err = 0;
             if (!in || in_len < 0 || out_cap < 0 || (!out && out_cap > 0)) return SUPPI_EBAD;
-            r.p = in; r.e = in + in_len;
-            w.b = out; w.p = out; w.e = out ? out + out_cap : out; w.ovf = 0;
-            sp_root_base = sp_gc_nroots;
-            if (setjmp(jb)) { suppi__capture(); sp_gc_nroots = sp_root_base; return SUPPI_ERAISE; }
-            sp_exc_arm(jb);
-            rc = suppi_body_#{name}(&r, &w);
-            sp_exc_disarm();
-            return rc;
+            c.in = in; c.in_len = in_len; c.out = out; c.out_cap = out_cap; c.rc = 0;
+            if (#{try}(suppi_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(msg); return SUPPI_ERAISE; }
+            return c.rc;
         }
       C
     end
@@ -1231,11 +1282,10 @@ module Suppify
   # (renamed main + appended trampolines/error API/init), and the neutral
   # header consumers include.
   class Pipeline
-    MAIN_RE = /\bint\s+main\s*\(/
-
-    def initialize(ruby_source:, c_source:, symbols_json:, lib_name:, rbs_signatures: {})
+    def initialize(ruby_source:, c_source:, header_text:, symbols_json:, lib_name:, rbs_signatures: {})
       @ruby_source     = ruby_source
       @c_source        = c_source
+      @header_text     = header_text
       @cnames          = parse_symbols(symbols_json)
       @lib_name        = lib_name
       @rbs_signatures  = rbs_signatures
@@ -1244,8 +1294,7 @@ module Suppify
     def run
       exports = build_exports
       flat = FlatCall.new(lib_name: @lib_name, entries: exports.select { |e| e["flat"] })
-      c = rename_main(@c_source)
-      c = c + trampolines(exports.select { |e| e["neutral"] })
+      c = @c_source + trampolines(exports.select { |e| e["neutral"] })
       c = c + flat.c_source
       { exports: exports, c_source: c, header: header(exports, flat) }
     end
@@ -1257,9 +1306,9 @@ module Suppify
     # generated from ("flat").
     def build_exports
       Source.new(@ruby_source).public_methods.map do |ruby_name|
-        cname = @cnames[ruby_name]
+        cname = @cnames["#{Source.wrapper_module(@lib_name)}.#{Source::WRAPPER_PREFIX}#{ruby_name}"]
         next nil unless cname # public method spinel did not emit (e.g. unused) — skip
-        sig = SignatureExtractor.extract(@c_source, cname)
+        sig = SignatureExtractor.extract(@header_text, cname)
         rbs = @rbs_signatures[ruby_name]
         e = { "public" => ruby_name, "cname" => cname, "sig" => sig, "neutral" => neutral?(sig) }
         if rbs
@@ -1322,13 +1371,6 @@ module Suppify
       (data["symbols"] || []).each_with_object({}) { |e, h| h[e["ruby"]] = e["c"] }
     end
 
-    # Renames the generated `int main(...)` entry to `static int sp__main(...)`
-    # so lib_init can drive it and the library carries no `main` symbol.
-    def rename_main(c_source)
-      raise Error, "no `int main(` found" unless c_source.match?(MAIN_RE)
-      c_source.sub(MAIN_RE, "static int sp__main(")
-    end
-
     # ---- the C block appended to the generated translation unit: extern
     # trampolines (with a per-call setjmp exception barrier), the error
     # query API, and <lib_name>_init.
@@ -1346,6 +1388,7 @@ module Suppify
       out << "static const char *g_suppi_msg = 0;\n"
       out << "static char g_suppi_msgbuf[256];\n"
       out << capture
+      out << call_ctx
       exports.each { |e| out << trampoline(e) << "\n" }
       out << "int #{@lib_name}_error(void) { return g_suppi_err; }\n"
       out << "const char *#{@lib_name}_error_message(void) { return g_suppi_msg; }\n"
@@ -1354,53 +1397,55 @@ module Suppify
       out
     end
 
-    # Runs in each trampoline's setjmp handler (still at the armed stack level,
-    # before disarm) to snapshot spinel's exception message — held at
-    # sp_exc_msg[sp_exc_top - 1] — into a static buffer, then disarm + flag.
-    # sp_exc_msg / sp_exc_top are file-static in this same TU.
+    # Runs when a <kernel>_try frame reports a raise: copies spinel's message
+    # (only valid until the next call) into this library's own buffer so
+    # <lib>_error_message() stays valid, and sets the error flag.
     def capture
       <<~C
 
-        static void suppi__capture(void) {
-            const char *m = (sp_exc_top > 0 && sp_exc_msg[sp_exc_top - 1])
-                          ? sp_exc_msg[sp_exc_top - 1] : "uncaught exception";
+        static void suppi__capture(const char *m) {
+            if (!m || !*m) m = "uncaught exception";
             strncpy(g_suppi_msgbuf, m, sizeof g_suppi_msgbuf - 1);
             g_suppi_msgbuf[sizeof g_suppi_msgbuf - 1] = 0;
             g_suppi_msg = g_suppi_msgbuf;
-            sp_exc_disarm();
             g_suppi_err = 1;
         }
       C
     end
 
+    # What a flat entry's thunk receives through <kernel>_try's void *ctx.
+    def call_ctx
+      <<~C
+
+        typedef struct { const uint8_t *in; int32_t in_len; uint8_t *out; int32_t out_cap; int32_t rc; } suppi_call_ctx;
+      C
+    end
+
+    # The scalar entry: arguments travel to a thunk through <kernel>_try's
+    # ctx struct, so the call (string dup included) runs inside spinel's
+    # try frame, which also restores the GC root count on a caught raise.
     def trampoline(e)
       sig  = e["sig"]
       ret  = NeutralType.map(sig.return_type)
-      ps   = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n}" }
+      name = e["public"]
+      try  = "#{Suppify.kernel_init_name(@lib_name)}_try"
+      fields = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n};" }
+      fields << "#{ret} r;" unless ret == "void"
+      fields << "int unused;" if fields.empty?
+      ps = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n}" }
       plist = ps.empty? ? "void" : ps.join(", ")
-      body = +"#{ret} #{e['public']}(#{plist}) {\n"
+
+      body = +"typedef struct { #{fields.join(' ')} } suppi_sc_#{name};\n"
+      body << "static void suppi_sc_thunk_#{name}(void *p) {\n"
+      body << "    suppi_sc_#{name} *c = (suppi_sc_#{name} *)p;\n"
+      args = sig.params.map { |t, n| string_arg(body, t, n, "c->#{n}") }.join(", ")
+      body << "    #{ret == 'void' ? '' : 'c->r = '}#{e['cname']}(#{args});\n}\n"
+      body << "#{ret} #{name}(#{plist}) {\n"
+      body << "    suppi_sc_#{name} c; const char *cls, *msg;\n"
       body << "    g_suppi_err = 0;\n"
-      body << "    jmp_buf jb;\n"
-      # __attribute__((cleanup)) (what SP_GC_ROOT uses, see string_arg below)
-      # never runs across a longjmp landing back at this setjmp -- it only
-      # fires on normal scope exit. Snapshotting sp_gc_nroots here and
-      # restoring it on the caught-exception path undoes any root left
-      # dangling by an exception raised while a duped string was rooted;
-      # once we've decided to abort the call nothing rooted during it matters.
-      body << "    int sp_root_base = sp_gc_nroots;\n"
-      body << (ret == "void" ? "    if (setjmp(jb)) { suppi__capture(); sp_gc_nroots = sp_root_base; return; }\n"
-                              : "    if (setjmp(jb)) { suppi__capture(); sp_gc_nroots = sp_root_base; return 0; }\n")
-      body << "    sp_exc_arm(jb);\n"
-      args = sig.params.map { |t, n| string_arg(body, t, n) }.join(", ")
-      if ret == "void"
-        body << "    #{e['cname']}(#{args});\n"
-        body << "    sp_exc_disarm();\n"
-      else
-        body << "    #{ret} r = #{e['cname']}(#{args});\n"
-        body << "    sp_exc_disarm();\n"
-        body << "    return r;\n"
-      end
-      body << "}\n"
+      sig.params.each { |_, n| body << "    c.#{n} = #{n};\n" }
+      body << "    if (#{try}(suppi_sc_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(msg); return#{ret == 'void' ? '' : ' 0'}; }\n"
+      body << "    return#{ret == 'void' ? '' : ' c.r'};\n}\n"
       body
     end
 
@@ -1416,10 +1461,10 @@ module Suppify
     # allocating, and a fresh string starts unmarked). SP_GC_ROOT is the same
     # discipline spinel's own codegen uses for its local variables, so each
     # duped string is declared as a named local and rooted immediately.
-    def string_arg(body, t, n)
-      return n unless NeutralType.kind(t) == :string
+    def string_arg(body, t, n, expr)
+      return expr unless NeutralType.kind(t) == :string
       dup = "sp_dup_#{n}"
-      body << "    const char *#{dup} = sp_str_dup_external(#{n}); SP_GC_ROOT(#{dup});\n"
+      body << "    const char *#{dup} = sp_str_dup_external(#{expr}); SP_GC_ROOT(#{dup});\n"
       dup
     end
 
@@ -1448,12 +1493,13 @@ module Suppify
       C
     end
 
+    # <lib>_init stays idempotent (bindings call it from each VM's load hook);
+    # the initialization itself is spinel's --ext-init function.
     def lib_init
       <<~C
         void #{@lib_name}_init(void) {
             static int done = 0; if (done) return; done = 1;
-            char *av[] = { (char *)"lib", 0 };
-            sp__main(1, av);
+            #{Suppify.kernel_init_name(@lib_name)}();
         }
       C
     end

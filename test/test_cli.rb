@@ -140,21 +140,23 @@ class TestCLISeeding < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "tmp"))
       _source, rooted, rbs_dir = seed(dir, INLINE)
-      assert_match(/if false\n  f\(0\)\n/, File.read(rooted))
+      assert_match(/if false\n  SuppiExport\.suppi_f\(0\)\n/, File.read(rooted))
       assert_match(/def f: \(Integer\) -> Integer/,
                    File.read(File.join(rbs_dir, "_suppify_inline.rbs")))
     end
   end
 
-  # With a sidecar and no inline annotations, the seed directory is the
-  # input's own -- unchanged, so anything else the user keeps there
-  # (declarations for their own classes) still reaches spinel.
-  def test_sidecar_only_source_seeds_from_the_inputs_own_directory
+  # A sidecar is copied into the seed directory unchanged (so declarations
+  # for the user's own classes still reach spinel), beside the wrapper
+  # module's RBS.
+  def test_sidecar_is_copied_into_the_seed_beside_the_wrapper_rbs
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "tmp"))
       sidecar = "class Object\n  def f: (Integer) -> Integer\nend\n"
       _source, _rooted, rbs_dir = seed(dir, "def f(a) = a\n", sidecar: sidecar)
-      assert_equal File.expand_path(dir), rbs_dir
+      assert_equal sidecar, File.read(File.join(rbs_dir, "k.rbs"))
+      assert_match(/def self\.suppi_f: \(Integer\) -> Integer/,
+                   File.read(File.join(rbs_dir, "_suppify_wrapper.rbs")))
     end
   end
 
