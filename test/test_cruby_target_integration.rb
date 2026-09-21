@@ -101,6 +101,39 @@ class TestCRubyTargetIntegration < Test::Unit::TestCase
     end
   end
 
+  # A kernel with Array/Hash methods must still produce a gem that builds:
+  # those methods have no neutral scalar C entry, so the CRuby binding skips
+  # them (their contract is the flat MessagePack entry, which is compiled
+  # into the same extension and stays callable from C). The scalar methods
+  # beside them are registered as before.
+  def test_gem_with_collection_methods_builds_and_registers_only_the_scalar_ones
+    omit("spinel not on PATH / SPINEL_LIB unset") unless spinel_available?
+
+    Dir.mktmpdir do |dir|
+      FileUtils.cp(File.expand_path("fixtures/flat.rb", __dir__), File.join(dir, "flat.rb"))
+
+      Dir.chdir(dir) do
+        assert_equal 0, Suppify::CLI.run(["flat.rb", "-o", "flatlib", "-t", "cruby"])
+        ext = File.join(dir, "flatlib", "ext", "flatlib")
+        Dir.chdir(ext) do
+          assert system(RbConfig.ruby, "extconf.rb", out: File::NULL), "extconf failed"
+          assert system("make", out: File::NULL), "make failed"
+          bundle = Dir.glob("*.{so,bundle}").first
+          assert bundle, "extension not built"
+
+          script = <<~RUBY
+            require_relative #{File.basename(bundle, '.*').inspect}
+            print add(2, 3), " "
+            print respond_to?(:scale_sum, true), " "
+            print respond_to?(:bump, true)
+          RUBY
+          out = IO.popen([RbConfig.ruby, "-e", script], &:read)
+          assert_equal "5 false false", out.strip
+        end
+      end
+    end
+  end
+
   def test_emitted_gem_packages_with_gem_build
     omit("spinel not on PATH / SPINEL_LIB unset") unless spinel_available?
 

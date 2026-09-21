@@ -262,3 +262,45 @@ class TestBindingMrubyc < Test::Unit::TestCase
     assert_match(/void mrb_picoruby_addlib_gem_final\(mrb_state \*mrb\) \{ \(void\)mrb; \}/, @c)
   end
 end
+
+# A method whose RBS gives it an Array/Hash/Symbol parameter or return has
+# no neutral scalar C entry for a VM binding to wrap -- its contract is the
+# flat MessagePack entry. Each renderer skips it, so the emitted gem still
+# builds (and the VM caller keeps using the interpreted method, or the flat
+# entry, for that one).
+class TestBindingSkipsNonNeutralExports < Test::Unit::TestCase
+  def setup
+    @exports = [
+      { "public" => "add", "cname" => "sp_add", "neutral" => true,
+        "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) },
+      { "public" => "scale", "cname" => "sp_scale", "neutral" => false, "flat" => true,
+        "sig" => Suppify::Signature.new("sp_int", [["sp_IntArray *", "xs"]]) },
+    ]
+  end
+
+  def test_cruby_binding_wraps_only_the_neutral_export
+    c = Suppify::Binding::CRuby.render("addlib", @exports)
+    assert_match(/rb_define_global_function\("add"/, c)
+    assert_no_match(/scale/, c)
+  end
+
+  def test_mruby_binding_wraps_only_the_neutral_export
+    c = Suppify::Binding::Mruby.render("addlib", "mrb_picoruby_addlib_gem_init", @exports)
+    assert_match(/mrb_define_method\(mrb, mrb->kernel_module, "add"/, c)
+    assert_no_match(/scale/, c)
+  end
+
+  def test_mrubyc_binding_wraps_only_the_neutral_export
+    c = Suppify::Binding::Mrubyc.render("addlib", "mrb_picoruby_addlib_gem_init", @exports)
+    assert_match(/mrbc_define_method\(0, 0, "add", c_suppi_add\);/, c)
+    assert_no_match(/scale/, c)
+  end
+
+  # Exports from a Pipeline that predates the "neutral" key (or a scalar-only
+  # library) are wrapped as before.
+  def test_exports_without_the_neutral_key_are_still_wrapped
+    plain = [{ "public" => "add", "cname" => "sp_add",
+               "sig" => Suppify::Signature.new("sp_int", [["sp_int", "a"], ["sp_int", "b"]]) }]
+    assert_match(/rb_define_global_function\("add"/, Suppify::Binding::CRuby.render("addlib", plain))
+  end
+end
