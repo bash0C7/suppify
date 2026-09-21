@@ -34,7 +34,7 @@ module Suppify
       sp_marshal.c sp_format.c sp_string.c sp_inspect.c sp_dtoa.c
       sp_array.c sp_str.c sp_hash.c sp_proc.c sp_exc.c sp_random.c
       sp_re.c sp_fiber.c sp_sched.c sp_io.c sp_process.c
-      sp_process_status.c sp_cold.c
+      sp_process_status.c sp_iobuffer.c sp_cold.c
     ].freeze
 
     def copy_flat(lib_dir, dest_dir)

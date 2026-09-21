@@ -2,9 +2,9 @@
 
 ## spinel pin 更新（完了）
 
-状態: **完了**。`spinel.pin` を `e52019d6`（2026-07-19）から `d0feb620`（2026-09-14, upstream
-master HEAD）へ更新し、`rake spinel:check_pin[d0feb620...]` が実 spinel クローン+ビルド+picoruby
-実リンクまで含めて 100% green（129 tests, 326 assertions, 0 failures/errors）。
+状態: **完了**。`spinel.pin` は `4a28d45f`（matz/spinel）。`rake spinel:check_pin[4a28d45f...]` が実 spinel
+クローン+ビルド+picoruby 実リンクまで含めて 100% green（204 tests, 625 assertions, 0 failures/errors）、
+runtime source drift なし。
 
 見つかった実差分（すべて修正済み、コミット済み）:
 
@@ -16,7 +16,9 @@ master HEAD）へ更新し、`rake spinel:check_pin[d0feb620...]` が実 spinel 
   同名文字列は無関係（mruby VM 側 API の型名で、意図的に変更していない）。
 - **`RT_MEMBERS` の増加**: upstream が `sp_slab sp_dtoa sp_hash sp_proc sp_exc sp_random
   sp_process sp_process_status` の 8 ファイルを追加。`lib/suppify/package.rb` の
-  `RuntimeSources::SOURCES`（23→31 件）を追従。
+  `RuntimeSources::SOURCES` を追従。さらに `sp_iobuffer`（`sp_exc.c` / `sp_bigint.c` が
+  `sp_iobuffer.h` を参照する）が加わり、`SOURCES` に `sp_iobuffer.c` を追加。header は `copy_flat` が
+  `lib/*.h` を glob するので追加不要、`SymbolPrefix` の discovery は自動で prefix する（`nm` で確認済み）。
 - **`test/test_picoruby_target_integration.rb` の別件バグ（spinel と無関係）**: picoruby 本体の
   `conf.picoruby` が `alloc_estalloc: true` を既定にした（`picoruby-machine` の estalloc 実装が
   前提）ため、`picoruby-machine` を含まないこのテストの最小 host build がリンクエラーになった。

@@ -11,7 +11,7 @@ class TestRuntimeSources < Test::Unit::TestCase
     assert_includes s, "sp_gc.c"
     assert_includes s, "sp_str.c"
     assert_includes s, "regexp/re_compile.c"
-    assert_equal 31, s.length
+    assert_equal 32, s.length
   end
 
   # copy_flat flattens every runtime .c and every header into one dir (so a
