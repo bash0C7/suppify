@@ -10,8 +10,21 @@ build or run time. Design rationale: `docs/superpowers/specs/2026-06-21-suppify-
 
 The `c`, `cruby`, and `picoruby` targets are implemented and verified
 end-to-end against a real `spinel` (for `picoruby`, against a real
-picoruby host build). Known limits: scalar types only (no `Array`/`Hash`/
-custom classes), top-level methods only. Work in flight is tracked in
+picoruby host build).
+
+Two ways to call an exported method, with different reach:
+
+- the **plain C entry** (`intptr_t add(intptr_t, intptr_t)`) — scalars only
+  (`Integer`, `Float`, `String`, `bool`, `void`), and what the CRuby /
+  PicoRuby bindings wrap;
+- the **flat-message entry** (`<lib>_add_call`, one MessagePack message in,
+  one out) — every type spinel can represent, including `Array`, `Hash`,
+  `Symbol`, tuples, optionals and `untyped`, nested at any depth. See
+  [The flat-message entry](#the-flat-message-entry-messagepack).
+
+Known limits: top-level methods only; no custom classes; whatever spinel
+itself cannot type (see [What crosses the
+boundary](#what-crosses-the-boundary)). Work in flight is tracked in
 `HANDOFF.md`. Treat this as a working core, not a finished,
 broadly-hardened tool.
 
@@ -58,7 +71,10 @@ ruby suppify.rb app.rb -o libname [-d out_dir] [-t c|cruby|picoruby]
 | `--license <name>` | `cruby`/`picoruby` only: the emitted gem/mrbgem's license | unset for `cruby` (omitted from the gemspec); `MIT` for `picoruby` (its build requires one) |
 
 The `.rbs` sidecar isn't a flag — it's looked up automatically next to the
-input file, same basename (e.g. `foo/app.rb` → `foo/app.rbs`). There's no
+input file, same basename (e.g. `foo/app.rb` → `foo/app.rbs`), and it is
+optional: the method types can be written inline above each `def` instead
+(see [Every exported method needs an RBS method
+type](#every-exported-method-needs-an-rbs-method-type)). There's no
 `--spinel-bin` / `--spinel-lib` flag yet; spinel is only discovered via
 `PATH` and the `SPINEL` / `SPINEL_LIB` env vars described above.
 
@@ -68,7 +84,7 @@ With the default `c` target, produces in `out_dir` (default `.`):
   recompiled, namespaced copy of spinel's runtime (consumers never need
   spinel installed, and never link a separate runtime archive)
 - `libname.h` — a **neutral** header (no spinel types leak through; see
-  "Supported types" below)
+  [What crosses the boundary](#what-crosses-the-boundary) below)
 
 ## Targets
 
@@ -300,15 +316,49 @@ Private methods stay hidden (`static`) inside the archive. This follows
 Ruby's own `public`/`private` declarations — there's no separate `--export`
 mechanism.
 
-### A `.rbs` sidecar is required for every exported method
+### Every exported method needs an RBS method type
 
 spinel eliminates any top-level method nothing in the program calls,
 regardless of visibility. Since suppify's exported methods are — by
 definition — never called from inside the program, suppify needs a type
 signature for each one, both to keep spinel from deleting it and to give it
-a concrete C-callable type. Declare it in `<basename>.rbs` next to
-`app.rb` (same convention spinel's own `--rbs` support uses for top-level
-methods, which are Object instance methods under the hood):
+a concrete C-callable type.
+
+Write it **inline**, in the comment block immediately above the `def`, and
+`app.rb` is the only file you need:
+
+```ruby
+# app.rb
+#: (Integer, Integer) -> Integer
+def add(a, b) = a + b
+
+#: (Array[Integer], Integer) -> Integer
+def scale_sum(xs, k) = xs.sum * k
+
+#: () -> void
+def boom = raise "x"
+```
+
+That `#:` line is [rbs-inline](https://github.com/soutaro/rbs-inline)'s
+method-type comment. Its per-parameter form works too, for the cases where
+naming each parameter reads better:
+
+```ruby
+# @rbs a: Integer
+# @rbs b: Integer
+# @rbs return: Integer
+def add(a, b) = a + b
+```
+
+Only that trivial subset of `@rbs` is read (one `name: type` per
+parameter, plus `return:`); every parameter needs one, or suppify fails and
+says which is missing. Mixing `#:` and `@rbs` on the same `def` is an
+error rather than a guess about which wins.
+
+The **`.rbs` sidecar** keeps working exactly as before, unchanged: a file
+`<basename>.rbs` next to `app.rb` (same convention spinel's own `--rbs`
+support uses for top-level methods, which are Object instance methods under
+the hood):
 
 ```
 class Object
@@ -317,15 +367,189 @@ class Object
 end
 ```
 
-If a public method has no matching signature, `suppify` fails fast and
-names the method — it never silently drops it.
+The two can be mixed across methods in one program, but **not for the same
+method**: a method declared both inline and in the sidecar is an error
+naming the method, never a silent precedence. If a public method has no
+signature in either place, `suppify` fails fast and names it — it never
+silently drops it.
 
-### Supported types
+### What crosses the boundary
 
-`Integer`, `Float`, `String`, `Symbol`, `bool` (`TrueClass`/`FalseClass`),
-`nil`/`NilClass`, `void` (return only). Anything else — `Array`, `Hash`,
-custom classes — is not yet supported and raises a clear error rather than
-silently producing a broken export.
+Which types are available is spinel's call, not suppify's: a top-level
+method's parameters and return get the C type spinel's own codegen gives
+them, and suppify marshals exactly those. The table below is that
+inventory, read off spinel's generated C at the pinned commit (the unit
+test `TestFlatCallTypes` asserts every row):
+
+| RBS type | spinel's C type | plain C entry | flat-message entry |
+|---|---|---|---|
+| `Integer` | `sp_int` (= `intptr_t`: 8 bytes on a host, 4 on a 32-bit MCU) | ✅ `intptr_t` | ✅ |
+| `Float` | `sp_float` (= `double`, on **every** target) | ✅ `double` | ✅ |
+| `String` | `const char *` | ✅ | ✅ |
+| `bool` / `TrueClass` / `FalseClass` | `sp_bool` | ✅ `int` | ✅ |
+| `void` (return only) | `void` | ✅ | ✅ (writes `nil`) |
+| `Symbol` | `sp_sym` | ❌ | ✅ (carried as a str) |
+| `Array[Integer]` | `sp_IntArray *` | ❌ | ✅ |
+| `Array[Float]` | `sp_FloatArray *` | ❌ | ✅ |
+| `Array[String]` | `sp_StrArray *` | ❌ | ✅ |
+| `Array[T]` otherwise (incl. nested containers, `Array[Symbol]`) | `sp_PolyArray *` | ❌ | ✅ |
+| tuple `[T1, T2, ...]` | `sp_PolyArray *` | ❌ | ✅ |
+| `Hash[Integer, Integer]` | `sp_IntIntHash *` | ❌ | ✅ |
+| `Hash[Integer, String]` | `sp_IntStrHash *` | ❌ | ✅ |
+| `Hash[String, Integer]` | `sp_StrIntHash *` | ❌ | ✅ |
+| `Hash[String, String]` | `sp_StrStrHash *` | ❌ | ✅ |
+| `Hash[String, V]` otherwise | `sp_StrPolyHash *` | ❌ | ✅ |
+| `Hash[Symbol, V]` | `sp_SymPolyHash *` | ❌ | ✅ |
+| `Hash[K, V]` otherwise | `sp_PolyPolyHash *` | ❌ | ✅ |
+| `Integer?` / `Float?` / `String?` / `Array[...]?` / `Hash[...]?` | the same C type, carrying nil in-band (`SP_INT_NIL`, a reserved NaN, `NULL`) | ❌ | ✅ |
+| `Symbol?` / `bool?` | `sp_RbVal` (boxed) | ❌ | ✅ |
+| `untyped` | `sp_RbVal` (boxed) | ❌ | ✅ |
+
+Containers nest to any depth (`Array[Array[Integer]]`,
+`Hash[String, Array[Float]]`, `Array[Hash[Symbol, Float]]`, …): the element
+type decides the element's representation, recursively, and suppify
+generates a decoder per type node rather than per supported shape.
+
+Rejected, with an error naming the reason:
+
+- **any other class** (`Time`, `Set`, your own classes): spinel has no
+  boundary representation for it — `RBS type Time has no spinel
+  representation at the suppify boundary`.
+- **unions** (`Integer | String`): a union has no single C type, and
+  spinel's `--rbs` seeding does not reject one — it silently collapses it
+  to whatever type the call site passes. suppify rejects it instead.
+- **`nil` as a parameter type**: rejected by spinel itself (`spinel: method
+  'f' param 'a' has unsupported type nil`). Use `T?`, or `void` for a
+  return.
+- **a parameter whose C type spinel did not give the type suppify expects**:
+  suppify predicts each parameter's C type and checks the prediction against
+  the signature spinel emitted, so a divergence is reported instead of
+  compiled into a type-punned call.
+
+Two limits belong to spinel, not to suppify, and show up as a spinel error
+or a C compile error rather than a suppify message:
+
+- a method **returning `Symbol`** from a poly slot (e.g. `def f(xs) =
+  xs[0]` typed `(Array[Symbol]) -> Symbol`) makes spinel emit C that
+  returns `sp_RbVal` from a function declared `sp_sym`, and the generated
+  TU fails to compile.
+- an `Integer` equal to `INTPTR_MIN` (`-2**63` on a host, `-2147483648` on
+  a 32-bit MCU) **is** spinel's in-band nil for an int slot (`SP_INT_NIL`),
+  so passing it reaches the kernel as `nil` and the kernel raises. suppify
+  cannot tell the two apart and does not pretend to — the call answers "the
+  kernel raised" with spinel's own message.
+
+### The flat-message entry (MessagePack)
+
+Besides the plain C entry, **every** exported method gets a byte-message
+entry that hides the Ruby types from the caller entirely:
+
+```c
+int32_t     <lib>_<m>_call(const uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap);
+const char *<lib>_<m>_signature(void);
+```
+
+- **`in`** is one MessagePack **array**: one element per parameter, in
+  declaration order.
+- **`out`** receives one MessagePack **value**: the return value (`nil` for
+  a `void` method).
+- the **return value of `_call`** is the number of bytes written (`>= 0`),
+  or a negative status:
+
+  | status | `<LIB>_E_…` | meaning |
+  |---|---|---|
+  | `-1` | `_E_MALFORMED` | truncated input, wrong argument count, or a value that is not the declared RBS type |
+  | `-2` | `_E_NOSPACE` | `out_cap` is too small for the reply (nothing is written) |
+  | `-3` | `_E_RAISED` | the kernel raised; the message is at `<lib>_error_message()` |
+  | `-4` | `_E_RANGE` | an `Integer` in the message does not fit this target's `sp_int` |
+
+  Those four macros are in the generated header.
+- **`_signature()`** returns the RBS method type as written, e.g.
+  `"(Array[String], Hash[Symbol, Float]) -> Array[Float]"` — no compact
+  private encoding, so a caller can log it, check it, or drive a generic
+  codec from it.
+
+Why MessagePack: it is a standard, self-describing format with an
+implementation in every language, so the **caller needs no knowledge of the
+RBS at all** — encode whatever value tree you have. It is the kernel side
+that knows the declared types: it validates the message against them while
+decoding and answers `-1` on a mismatch.
+
+How the Ruby types map onto the format:
+
+| Ruby / RBS | MessagePack |
+|---|---|
+| `nil` | nil |
+| `true` / `false` | bool |
+| `Integer` | int (any width; range-checked against the target's `sp_int` on the way in, `-4` if it does not fit) |
+| `Float` | **float64 only** (`0xcb`), never narrowed to float32, so `NaN`, `±Infinity`, `-0.0` and subnormals survive bit for bit. `sp_float` is `double` on every spinel target, host and MCU alike, so the same bytes mean the same number on both |
+| `String` | str (raw bytes; a String with embedded NULs or non-UTF-8 bytes survives) |
+| `Symbol` | str — MessagePack has no symbol type. A `Symbol`-declared slot decodes a str back into a Symbol; on the way out a Symbol is written as a str |
+| `Array`, tuple | array |
+| `Hash` | map, **in insertion order**, both directions |
+
+A `Float`-declared slot accepts only a MessagePack float (`0xca`/`0xcb`);
+an int there is a type mismatch (`-1`), not a silent widening. A
+`String`-declared slot accepts str (not bin). An `untyped` slot takes
+whatever the message says — a str becomes a `String` (nothing in the
+message says Symbol), an array becomes an `Array`, a map becomes a `Hash`.
+
+What goes **out** is what the kernel actually produced, encoded from
+spinel's own runtime value: if a `Hash[Symbol, Float]`'s value slot holds
+an Integer, the reply carries an int — exactly what CRuby would answer for
+the same call. A value spinel can hold but MessagePack cannot name (a
+Bignum, `Time`, `Range`, a user object) answers `-1`.
+
+Calling it is plain C:
+
+```c
+#include "addlib.h"
+uint8_t in[] = { 0x92, 0x02, 0x03 };   /* [2, 3] */
+uint8_t out[64];
+addlib_init();
+int32_t n = addlib_add_call(in, sizeof in, out, sizeof out);
+/* n == 1, out[0] == 0x05 */
+```
+
+#### Memory
+
+Decoding builds real Ruby objects in **the kernel's own spinel heap** —
+there is no second allocator. Every object is rooted (`SP_GC_ROOT`) from
+the moment it is built until its owner holds it, so a collection triggered
+mid-decode cannot sweep a half-built message; once the call returns they
+are ordinary garbage for that instance's GC. Two suppify libraries in one
+binary have two separate heaps (their runtime symbols are namespaced per
+library), but they share the C `malloc` underneath.
+
+Sizing knobs, all spinel's:
+
+- `-DSP_GC_STACK_MAX=<n>` sets the GC root stack (default 65536 entries =
+  512 KB of static buffer, usually the largest static allocation on an
+  MCU). Pass the same value to the runtime sources and the generated TU —
+  with the gem targets your own build_config's `cc.defines` reaches both.
+- `-DSP_DYN_SYMS_MAX=<n>` (default 8192) bounds dynamically interned
+  symbols. Symbol keys arriving from the wire intern dynamically, so a
+  caller sending unbounded *distinct* symbol keys fills that table; spinel
+  then returns symbol 0 for further names rather than raising. Prefer
+  `Hash[String, V]` for keys that come from untrusted input.
+- **Heap exhaustion is not a status.** spinel's allocator calls
+  `sp_oom_die()`, which prints `unhandled exception: out of memory` to
+  stderr and `exit(1)`s; the runtime offers no hook to turn that into a
+  return value, so `_call` cannot answer with one. Size the heap for the
+  largest message you will send.
+
+#### What the VM bindings do with these methods
+
+The CRuby and PicoRuby/mruby-c bindings wrap only the exports that have a
+plain scalar C entry. A method whose RBS gives it an `Array`, `Hash`,
+`Symbol` (or any other non-scalar) parameter or return has no such entry to
+wrap, so **the binding skips it**: the emitted gem still builds and its
+scalar methods are registered as usual, but that method is not defined as a
+Ruby method by the gem. Its contract is the flat entry, which is compiled
+into the same extension/mrbgem and callable from C there (`<lib>.h` is
+installed by both gem targets). From a Ruby VM you would otherwise just
+call the interpreted method — the flat entry exists for callers with no
+Ruby VM at all, such as a second MCU core.
 
 ### Errors
 
@@ -350,15 +574,31 @@ Each suppify library namespaces spinel's runtime symbols and its own
 lifecycle/error API (`<name>_init`, `<name>_error`, `<name>_error_message`,
 `<name>_str_len`) to its own `-o <name>`, so multiple suppify libraries can
 coexist — verified as two `cruby` gems `require`d into one Ruby process,
-and as two `picoruby` mrbgems linked into one picoruby binary. The `c`
-target has one remaining gap: directly linking two suppify-built `.a`
-files into the same binary (`cc ... -laddlib -lmullib`) still fails on a
-duplicate `sp_ctx_swap` symbol (spinel's Fiber context-switch primitive,
-whose name is hardcoded inside a raw assembly block that can't be
-renamed). It's stateless and identical across libraries, so this only
-happens if you link the raw `c`-target archives directly; the `cruby`/
-`picoruby` targets aren't affected. Pick distinct exported method names
-(`-o`/`def` names) across libraries either way, same as any C code.
+and as two `picoruby` mrbgems linked into one picoruby binary.
+
+The rename set is discovered by compiling spinel's runtime, which sees only
+what that runtime *defines*. Two globals are defined by the **generated**
+translation unit instead — `sp_exc_subclass_count` and
+`sp_exc_subclass_ids`, spinel's user-defined exception class table — so
+they were missed and collided between two libraries. They are renamed
+explicitly now (`SymbolPrefix::GENERATED_TU_SYMBOLS`); the prelude is
+force-included into the generated TU as well as the runtime sources, so the
+definition and its references move together.
+
+The `c` target has one remaining gap: directly linking two suppify-built
+`.a` files into the same binary (`cc ... -laddlib -lmullib`) still fails on
+a duplicate **`sp_ctx_swap`** symbol (spinel's Fiber context-switch
+primitive). Its name lives inside a raw assembly block as a *string
+literal*, where `#define` substitution never reaches: renaming it would
+rename the call sites and leave the definition behind, i.e. an
+undefined-symbol error instead of a duplicate one. Renaming it needs an
+object-file rewrite (`llvm-objcopy --redefine-sym`) that suppify does not
+do, because it would make every build depend on a binutils/llvm tool that
+is not present by default on macOS. It's stateless and bit-identical across
+libraries, so this only bites if you link the raw `c`-target archives
+directly; the `cruby`/`picoruby` targets aren't affected. Pick distinct
+exported method names (`-o`/`def` names) across libraries either way, same
+as any C code.
 
 ### Embedding an mrbgem in a PicoRuby application or firmware project
 
@@ -533,6 +773,10 @@ pass — only when their prerequisites are present, otherwise they're skipped
 
 - `test_integration.rb`, `test_ruby_ext_integration.rb`,
   `test_cruby_target_integration.rb` — need `spinel` on `PATH` + `SPINEL_LIB`.
+- `test_flat_call_integration.rb` — needs `spinel` on `PATH`; builds a
+  library from `test/fixtures/flat.rb` (inline `#:` annotations, no
+  sidecar), links a C driver against its flat-message entries, and compares
+  every answer against the same kernel running under CRuby.
 - `test_picoruby_target_integration.rb` — additionally needs a local picoruby
   checkout (`PICORUBY_ROOT`, default `~/dev/src/github.com/picoruby/picoruby`);
   it runs a full picoruby host build linking the generated mrbgem.
