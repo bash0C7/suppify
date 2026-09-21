@@ -121,6 +121,19 @@ class TestSymbolPrefix < Test::Unit::TestCase
     refute_includes symbols, "sp_ctx_swap"
   end
 
+  # The user-defined exception class table is emitted into the GENERATED TU
+  # (<lib>_gen.c), not the vendored runtime, so compiling lib/*.c only ever
+  # sees it as an undefined reference and it went unprefixed -- a duplicate
+  # symbol as soon as two suppify libraries met in one binary. It is added
+  # to the rename set explicitly.
+  def test_discover_runtime_symbols_includes_the_generated_tus_own_globals
+    omit("spinel not on PATH / SPINEL_LIB unset") unless spinel_lib_available?
+
+    symbols = Suppify::SymbolPrefix.discover_runtime_symbols(ENV["SPINEL_LIB"])
+    assert_includes symbols, "sp_exc_subclass_count"
+    assert_includes symbols, "sp_exc_subclass_ids"
+  end
+
   private
 
   def spinel_lib_available?

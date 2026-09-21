@@ -82,6 +82,17 @@ module Suppify
     # shared (unrenamed) is safe; it's the one runtime symbol excluded here.
     EXCLUDED = %w[sp_ctx_swap].freeze
 
+    # Globals the GENERATED translation unit defines (spinel emits them into
+    # <lib>_gen.c: the user-defined exception class table), not the vendored
+    # runtime -- so compiling lib/*.c never discovers them (they appear there
+    # only as undefined references) and they stayed unprefixed, colliding
+    # between two suppify libraries in one binary. The prelude is
+    # force-included into every .c of a library, generated TU included, so a
+    # #define here renames the definition and its references together.
+    # Harmless if a future spinel stops emitting one: a #define with nothing
+    # to rename has no effect.
+    GENERATED_TU_SYMBOLS = %w[sp_exc_subclass_count sp_exc_subclass_ids].freeze
+
     # spinel_rt.h -- included only by each generated program's own TU, not
     # by any of the lib/*.c sources -- embeds ~200 non-static function
     # bodies directly (spinel's normal build compiles it into exactly one
@@ -114,7 +125,7 @@ module Suppify
           raise Error, "discovery compile failed for #{c_path}:\n#{out}" unless $?.success?
           o_path
         end
-        parse_nm(`nm #{objs.join(' ')} 2>/dev/null`) - EXCLUDED
+        ((parse_nm(`nm #{objs.join(' ')} 2>/dev/null`) - EXCLUDED) + GENERATED_TU_SYMBOLS).uniq
       end
     end
 
