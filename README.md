@@ -460,7 +460,7 @@ const char *<lib>_<m>_signature(void);
   |---|---|---|
   | `-1` | `_E_MALFORMED` | truncated input, wrong argument count, or a value that is not the declared RBS type |
   | `-2` | `_E_NOSPACE` | `out_cap` is too small for the reply (nothing is written) |
-  | `-3` | `_E_RAISED` | the kernel raised; the message is at `<lib>_error_message()` |
+  | `-3` | `_E_RAISED` | the kernel raised; the message is at `<lib>_error_message()`, the exception class name at `<lib>_error_class()` |
   | `-4` | `_E_RANGE` | an `Integer` in the message does not fit this target's `sp_int` |
 
   Those four macros are in the generated header.
@@ -554,9 +554,11 @@ Ruby VM at all, such as a second MCU core.
 ### Errors
 
 Exceptions don't cross the C boundary as Ruby exceptions. Call
-`<name>_error()` / `<name>_error_message()` (e.g. `addlib_error()` for a
-library built with `-o addlib`) after invoking an exported function to
-check whether it raised. Full per-call exception propagation is a later
+`<name>_error()` / `<name>_error_message()` / `<name>_error_class()` (e.g.
+`addlib_error()` for a library built with `-o addlib`) after invoking an
+exported function to check whether it raised and with what (`_error_class()`
+is the Ruby class name, e.g. `ArgumentError`, and is empty when the last call
+did not raise; both strings stay valid until the next call). Full per-call exception propagation is a later
 phase, not v1.
 
 ### String returns and embedded NULs
@@ -571,7 +573,7 @@ internally when building a Ruby/mruby string from a returned value.
 ### Multiple suppify libraries in one binary
 
 Each suppify library namespaces spinel's runtime symbols and its own
-lifecycle/error API (`<name>_init`, `<name>_error`, `<name>_error_message`,
+lifecycle/error API (`<name>_init`, `<name>_error`, `<name>_error_message`, `<name>_error_class`,
 `<name>_str_len`) to its own `-o <name>`, so multiple suppify libraries can
 coexist — verified as two `cruby` gems `require`d into one Ruby process,
 and as two `picoruby` mrbgems linked into one picoruby binary.

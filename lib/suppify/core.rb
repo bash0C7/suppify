@@ -968,7 +968,7 @@ module Suppify
             g_suppi_err = 0;
             if (!in || in_len < 0 || out_cap < 0 || (!out && out_cap > 0)) return SUPPI_EBAD;
             c.in = in; c.in_len = in_len; c.out = out; c.out_cap = out_cap; c.rc = 0;
-            if (#{try}(suppi_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(msg); return SUPPI_ERAISE; }
+            if (#{try}(suppi_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(cls, msg); return SUPPI_ERAISE; }
             return c.rc;
         }
       C
@@ -1387,23 +1387,31 @@ module Suppify
       out << "static int g_suppi_err = 0;\n"
       out << "static const char *g_suppi_msg = 0;\n"
       out << "static char g_suppi_msgbuf[256];\n"
+      out << "static const char *g_suppi_cls = \"\";\n"
+      out << "static char g_suppi_clsbuf[128];\n"
       out << capture
       out << call_ctx
       exports.each { |e| out << trampoline(e) << "\n" }
       out << "int #{@lib_name}_error(void) { return g_suppi_err; }\n"
       out << "const char *#{@lib_name}_error_message(void) { return g_suppi_msg; }\n"
+      out << "const char *#{@lib_name}_error_class(void) { return g_suppi_err ? g_suppi_cls : \"\"; }\n"
       out << str_len_bridge
       out << lib_init
       out
     end
 
-    # Runs when a <kernel>_try frame reports a raise: copies spinel's message
-    # (only valid until the next call) into this library's own buffer so
-    # <lib>_error_message() stays valid, and sets the error flag.
+    # Runs when a <kernel>_try frame reports a raise: copies spinel's class
+    # name and message (only valid until the next call) into this library's
+    # own buffers so <lib>_error_class() / <lib>_error_message() stay valid,
+    # and sets the error flag.
     def capture
       <<~C
 
-        static void suppi__capture(const char *m) {
+        static void suppi__capture(const char *c, const char *m) {
+            if (!c) c = "";
+            strncpy(g_suppi_clsbuf, c, sizeof g_suppi_clsbuf - 1);
+            g_suppi_clsbuf[sizeof g_suppi_clsbuf - 1] = 0;
+            g_suppi_cls = g_suppi_clsbuf;
             if (!m || !*m) m = "uncaught exception";
             strncpy(g_suppi_msgbuf, m, sizeof g_suppi_msgbuf - 1);
             g_suppi_msgbuf[sizeof g_suppi_msgbuf - 1] = 0;
@@ -1444,7 +1452,7 @@ module Suppify
       body << "    suppi_sc_#{name} c; const char *cls, *msg;\n"
       body << "    g_suppi_err = 0;\n"
       sig.params.each { |_, n| body << "    c.#{n} = #{n};\n" }
-      body << "    if (#{try}(suppi_sc_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(msg); return#{ret == 'void' ? '' : ' 0'}; }\n"
+      body << "    if (#{try}(suppi_sc_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(cls, msg); return#{ret == 'void' ? '' : ' 0'}; }\n"
       body << "    return#{ret == 'void' ? '' : ' c.r'};\n}\n"
       body
     end
@@ -1510,6 +1518,7 @@ module Suppify
       out << "void #{@lib_name}_init(void);\n"
       out << "int #{@lib_name}_error(void);\n"
       out << "const char *#{@lib_name}_error_message(void);\n"
+      out << "const char *#{@lib_name}_error_class(void);\n"
       out << "size_t #{@lib_name}_str_len(const char *s);\n\n"
       exports.select { |e| e["neutral"] }.each do |e|
         sig = e["sig"]

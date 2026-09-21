@@ -649,12 +649,22 @@ class TestPipeline < Test::Unit::TestCase
   # On a caught exception the message spinel's <kernel>_try hands back is
   # copied into this library's own buffer, so <lib>_error_message() stays
   # valid after the next call.
+  # The class name is copied into its own buffer beside the message, and the
+  # accessor sits next to <lib>_error_message() in the C and the header.
+  def test_captures_exception_class_name
+    assert_match(/static char g_suppi_clsbuf\[/, @c)
+    assert_match(/static void suppi__capture\(const char \*c, const char \*m\)/, @c)
+    assert_match(/const char \*addlib_error_class\(void\) \{ return g_suppi_err \? g_suppi_cls : ""; \}/, @c)
+    assert_match(/suppi__capture\(cls, msg\); return 0; \}/, @c)
+    assert_match(/const char \*addlib_error_class\(void\);/, @h)
+  end
+
   def test_captures_exception_message
     assert_match(/static char g_suppi_msgbuf\[/, @c)
-    assert_match(/static void suppi__capture\(const char \*m\)/, @c)
+    assert_match(/static void suppi__capture\(const char \*c, const char \*m\)/, @c)
     assert_match(/strncpy\(g_suppi_msgbuf, m,/, @c)
     assert_match(/g_suppi_msg = g_suppi_msgbuf;/, @c)
-    assert_match(/suppi__capture\(msg\); return 0; \}/, @c)
+    assert_match(/suppi__capture\(cls, msg\); return 0; \}/, @c)
   end
 
   # spinel's strings carry a header (sp_str_hdr) and a marker byte at
@@ -830,7 +840,7 @@ class TestPipelineFlatEntries < Test::Unit::TestCase
   # the GC root-count restore of the scalar trampolines apply here too.
   def test_call_entry_runs_its_body_inside_the_try_frame
     assert_match(/c->rc = suppi_body_scale\(&r, &w\);/, @c)
-    assert_match(/if \(klib_spinel_try\(suppi_thunk_scale, &c, &cls, &msg\)\) \{ suppi__capture\(msg\); return SUPPI_ERAISE; \}/, @c)
+    assert_match(/if \(klib_spinel_try\(suppi_thunk_scale, &c, &cls, &msg\)\) \{ suppi__capture\(cls, msg\); return SUPPI_ERAISE; \}/, @c)
     assert_no_match(/setjmp|sp_exc_arm|sp_exc_disarm/, @c)
   end
 

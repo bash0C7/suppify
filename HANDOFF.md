@@ -6,7 +6,7 @@ Verified against spinel 4a28d45 by running it; suppify uses the library output w
 
 Replaced by spinel's contract:
 - Init: `int main` rename + `sp_lib_init` driving `sp__main` -> spinel's `<lib>_spinel()` (`--ext-init`). `<lib>_init` stays as a once-guard around it.
-- Exception capture: the per-call `setjmp` / `sp_exc_arm` / `sp_exc_disarm` / `sp_gc_nroots` snapshot -> `<lib>_spinel_try(fn, ctx, &cls, &msg)`. suppify still copies `msg` into its own buffer, so `<lib>_error_message()` outlives the next call.
+- Exception capture: the per-call `setjmp` / `sp_exc_arm` / `sp_exc_disarm` / `sp_gc_nroots` snapshot -> `<lib>_spinel_try(fn, ctx, &cls, &msg)`. suppify still copies `msg` into its own buffer, so `<lib>_error_message()` outlives the next call; the class name likewise goes to `<lib>_error_class()` (empty when the last call did not raise).
 - Signature source: `SignatureExtractor` now reads the emitted header's declarations (`ret name(params);`) instead of definition lines in the C body. The same parser, a stable contract.
 
 Stays, and why (evidence from running spinel):
