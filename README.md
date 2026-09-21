@@ -588,20 +588,18 @@ symbols are unique by construction, `SuppiExport_<lib>`); the prelude is
 force-included into the generated TU as well as the runtime sources, so the
 definition and its references move together.
 
-The `c` target has one remaining gap: directly linking two suppify-built
-`.a` files into the same binary (`cc ... -laddlib -lmullib`) still fails on
-a duplicate **`sp_ctx_swap`** symbol (spinel's Fiber context-switch
-primitive). Its name lives inside a raw assembly block as a *string
-literal*, where `#define` substitution never reaches: renaming it would
-rename the call sites and leave the definition behind, i.e. an
-undefined-symbol error instead of a duplicate one. Renaming it needs an
-object-file rewrite (`llvm-objcopy --redefine-sym`) that suppify does not
-do, because it would make every build depend on a binutils/llvm tool that
-is not present by default on macOS. It's stateless and bit-identical across
-libraries, so this only bites if you link the raw `c`-target archives
-directly; the `cruby`/`picoruby` targets aren't affected. Pick distinct
-exported method names (`-o`/`def` names) across libraries either way, same
-as any C code.
+`sp_ctx_swap` (spinel's Fiber context-switch primitive) is defined in a raw
+assembly block as a *string literal*, where the prelude's `#define` cannot
+reach. suppify renames it textually instead: each library's own copy of the
+runtime sources is rewritten so every spelling (the ELF label, the Mach-O
+label with its leading underscore, the ucontext fallback definition, the
+prototype in `sp_fiber_ctx.h`, the call sites) becomes
+`<lib_name>_sp_ctx_swap`, for all targets. Two suppify-built libraries
+therefore share no external runtime symbol, and their `.a` files link into
+one binary directly (`cc ... -laddlib -lmullib`). The one remaining shared
+namespace is the exported method names themselves (the scalar `<method>`
+entries are not prefixed), so pick distinct `def` names across libraries, as
+with any C code.
 
 ### Embedding an mrbgem in a PicoRuby application or firmware project
 
