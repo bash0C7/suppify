@@ -16,6 +16,25 @@ class TestTwoLibrariesIntegration < Test::Unit::TestCase
       x * 2
     end
 
+    #: (Integer) -> Integer
+    def fsum(n)
+      f = Fiber.new do
+        i = 1
+        while i <= n
+          Fiber.yield i
+          i += 1
+        end
+        0
+      end
+      s = 0
+      k = 0
+      while k < n
+        s += f.resume
+        k += 1
+      end
+      s
+    end
+
     #: (Integer) -> String
     def label(x)
       "ka-" + x.to_s + "-" + (:tag).to_s
@@ -51,10 +70,13 @@ class TestTwoLibrariesIntegration < Test::Unit::TestCase
         ka_init();
         for (i = 0; i < 2000; i++) {
             static const uint8_t in[] = { 0x91, 0x15 };            /* [21] */
+            static const uint8_t four[] = { 0x91, 0x04 };          /* [4] */
             int32_t n = ka_dbl_call(in, 2, out, sizeof out);
             check(n == 1 && out[0] == 0x2a, "ka dbl");
             n = ka_label_call(in, 2, out, sizeof out);
             check(n > 0 && out[0] == 0xa9 && memcmp(out + 1, "ka-21-tag", 9) == 0, "ka label");
+            n = ka_fsum_call(four, 2, out, sizeof out);
+            check(n == 1 && out[0] == 10, "ka fiber");
         }
         return 0;
     }
@@ -102,33 +124,25 @@ class TestTwoLibrariesIntegration < Test::Unit::TestCase
       .filter_map { |l| l.split[2]&.sub(/\A_/, "") }
   end
 
-  # sp_ctx_swap (Fiber context switch, defined inside an asm string that
-  # suppify cannot rename -- see the README) is the one symbol both
-  # libraries may define. Every other external symbol is per library.
-  def test_two_libraries_share_no_global_but_sp_ctx_swap
+  # Nothing external is defined by both archives: every runtime and kernel
+  # symbol is per library, sp_ctx_swap (an asm-string symbol) included.
+  def test_two_libraries_share_no_global_symbol
     omit("spinel not on PATH") unless spinel_available?
     Dir.mktmpdir("suppify-two-") do |dir|
       build(dir)
       shared = defined_globals(File.join(dir, "libka.a")) & defined_globals(File.join(dir, "libkb.a"))
-      assert_equal ["sp_ctx_swap"], shared
+      assert_equal [], shared
+      assert_includes defined_globals(File.join(dir, "libka.a")), "ka_sp_ctx_swap"
     end
   end
 
   # The two libraries linked into one binary and run from two threads at
-  # once. The duplicate sp_ctx_swap is removed from libkb with an
-  # object-file rename (the step the README says suppify does not do itself)
-  # so the linker accepts the pair.
+  # once, with no object-file surgery; ka also switches a real Fiber.
   def test_two_libraries_link_and_run_side_by_side_in_two_threads
     omit("spinel not on PATH") unless spinel_available?
-    objcopy = %w[llvm-objcopy objcopy].find { |t| system("which #{t} > /dev/null 2>&1") }
-    omit("no (llvm-)objcopy to rename sp_ctx_swap in one library") unless objcopy
     Dir.mktmpdir("suppify-two-") do |dir|
       build(dir)
       Dir.chdir(dir) do
-        sym = RUBY_PLATFORM.include?("darwin") ? "_sp_ctx_swap" : "sp_ctx_swap"
-        assert system("mkdir x && cd x && ar x ../libkb.a sp_fiber.o && " \
-                      "#{objcopy} --redefine-sym #{sym}=kb#{sym} sp_fiber.o && ar r ../libkb.a sp_fiber.o " \
-                      "> /dev/null 2>&1"), "could not rename sp_ctx_swap in libkb.a"
         assert system("cc driver.c -I. -L. -lka -lkb -lm -lpthread -o driver 2>link.log"),
                "the two libraries must link into one binary:\n#{File.read('link.log')}"
         assert_equal "OK\n", `./driver`

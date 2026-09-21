@@ -37,19 +37,36 @@ module Suppify
       sp_process_status.c sp_iobuffer.c sp_cold.c
     ].freeze
 
-    def copy_flat(lib_dir, dest_dir)
+    # spinel's Fiber context switch is defined in a file-scope asm string
+    # (sp_fiber.c), which a #define never reaches, so the prelude cannot
+    # namespace it. The copied text can be rewritten instead: every spelling
+    # of the name -- the ELF label, the Mach-O label with its leading
+    # underscore, the ucontext-fallback definition, the prototype in
+    # sp_fiber_ctx.h and each call site -- contains the substring, so one
+    # substitution renames them all consistently.
+    CTX_SWAP = "sp_ctx_swap"
+
+    # With lib_name, the copy carries <lib_name>_sp_ctx_swap so no external
+    # symbol is shared between two libraries; without it (symbol discovery)
+    # the sources are copied as they are.
+    def copy_flat(lib_dir, dest_dir, lib_name: nil)
       FileUtils.mkdir_p(dest_dir)
       sources = SOURCES.map do |rel|
         src = File.join(lib_dir, rel)
         raise Error, "spinel runtime source missing: #{src}" unless File.exist?(src)
         base = File.basename(rel)
-        FileUtils.cp(src, File.join(dest_dir, base))
+        copy_file(src, File.join(dest_dir, base), lib_name)
         base
       end
       header_paths(lib_dir).each do |src|
-        FileUtils.cp(src, File.join(dest_dir, File.basename(src)))
+        copy_file(src, File.join(dest_dir, File.basename(src)), lib_name)
       end
       { sources: sources }
+    end
+
+    def copy_file(src, dest, lib_name)
+      return FileUtils.cp(src, dest) unless lib_name
+      File.write(dest, File.binread(src).gsub(CTX_SWAP, "#{lib_name}_#{CTX_SWAP}"))
     end
 
     def header_paths(lib_dir)
@@ -73,13 +90,10 @@ module Suppify
     # toolchain, does the real compile later) and returns every externally
     # linked (non-static) symbol name spinel's runtime defines. Symbol names
     # are portable across target architectures; only the object code differs.
-    # sp_ctx_swap (spinel's Fiber context-switch primitive) is defined via a
-    # file-scope __asm__ string in sp_fiber.c with its symbol name hardcoded
-    # as a C string literal -- #define substitution never reaches inside a
-    # string, so renaming it would rename call sites but not the definition,
-    # producing an undefined-symbol link error. It's stateless and
-    # bit-identical regardless of which library compiles it, so leaving it
-    # shared (unrenamed) is safe; it's the one runtime symbol excluded here.
+    # sp_ctx_swap (spinel's Fiber context-switch primitive) is defined in a
+    # file-scope __asm__ string, out of a #define's reach; RuntimeSources.
+    # copy_flat renames it textually in each library's own copy of the
+    # sources, so it is not part of the #define set here.
     EXCLUDED = %w[sp_ctx_swap].freeze
 
     # Globals the GENERATED translation unit defines (spinel emits them into
@@ -199,7 +213,7 @@ module Suppify
       def build(c_path:, lib_name:, out_dir:)
         build_dir = File.dirname(c_path)
         runtime_dir = File.join(build_dir, "#{lib_name}_runtime")
-        copied = @copy_runtime.call(@spinel_lib, runtime_dir)
+        copied = @copy_runtime.call(@spinel_lib, runtime_dir, lib_name: lib_name)
 
         prelude_path = File.join(build_dir, "#{lib_name}_prelude.h")
         symbols = @discover_symbols.call(@spinel_lib)
@@ -249,7 +263,7 @@ module Suppify
         File.write(File.join(ext, "#{lib_name}_gen.c"), c_source)
         File.write(File.join(ext, "#{lib_name}.h"), header)
         File.write(File.join(ext, "binding.c"), Binding::CRuby.render(lib_name, exports))
-        RuntimeSources.copy_flat(spinel_lib, ext)
+        RuntimeSources.copy_flat(spinel_lib, ext, lib_name: lib_name)
 
         symbols = discover_symbols.call(spinel_lib)
         File.write(File.join(ext, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
@@ -324,7 +338,7 @@ module Suppify
         File.write(File.join(inc, "#{lib_name}.h"), header)  # public header for consumers
         File.write(File.join(src, "binding.c"), render_binding(lib_name, init_func, exports))
         File.write(File.join(mrblib, "#{lib_name}.rb"), mrblib_stub(lib_name))
-        RuntimeSources.copy_flat(spinel_lib, src)
+        RuntimeSources.copy_flat(spinel_lib, src, lib_name: lib_name)
 
         symbols = discover_symbols.call(spinel_lib)
         File.write(File.join(src, "#{lib_name}_prelude.h"), SymbolPrefix.prelude(lib_name, symbols))
