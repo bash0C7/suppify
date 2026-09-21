@@ -91,7 +91,12 @@ module Suppify
     # #define here renames the definition and its references together.
     # Harmless if a future spinel stops emitting one: a #define with nothing
     # to rename has no effect.
-    GENERATED_TU_SYMBOLS = %w[sp_exc_subclass_count sp_exc_subclass_ids].freeze
+    # With --ext-init the generated TU also defines the symbol/class lookups
+    # (sp_sym_to_s, ...) as external symbols instead of statics.
+    GENERATED_TU_SYMBOLS = %w[
+      sp_exc_subclass_count sp_exc_subclass_ids
+      sp_sym_to_s sp_sym_intern sp_sym_intern_n sp_class_to_s
+    ].freeze
 
     # spinel_rt.h -- included only by each generated program's own TU, not
     # by any of the lib/*.c sources -- embeds ~200 non-static function

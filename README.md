@@ -577,11 +577,14 @@ coexist — verified as two `cruby` gems `require`d into one Ruby process,
 and as two `picoruby` mrbgems linked into one picoruby binary.
 
 The rename set is discovered by compiling spinel's runtime, which sees only
-what that runtime *defines*. Two globals are defined by the **generated**
+what that runtime *defines*. A few globals are defined by the **generated**
 translation unit instead — `sp_exc_subclass_count` and
-`sp_exc_subclass_ids`, spinel's user-defined exception class table — so
-they were missed and collided between two libraries. They are renamed
-explicitly now (`SymbolPrefix::GENERATED_TU_SYMBOLS`); the prelude is
+`sp_exc_subclass_ids` (spinel's user-defined exception class table) and,
+under `--ext-init`, the `sp_sym_to_s` / `sp_sym_intern` / `sp_sym_intern_n` /
+`sp_class_to_s` lookups — so they are missed by discovery and would collide
+between two libraries. They are renamed
+explicitly (`SymbolPrefix::GENERATED_TU_SYMBOLS`; the wrapper module's entry
+symbols are unique by construction, `SuppiExport_<lib>`); the prelude is
 force-included into the generated TU as well as the runtime sources, so the
 definition and its references move together.
 
