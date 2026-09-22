@@ -77,14 +77,19 @@ module Suppify
       FileUtils.mkdir_p(tmp_dir)
       ruby_source = File.read(opts[:input])
       c_path = File.join(tmp_dir, "#{opts[:lib_name]}.c")
-      rooted_path, rbs_dir = root_and_seed(opts[:input], ruby_source, c_path)
+      source = build_source(opts[:input], ruby_source, opts[:lib_name])
+      rooted_path, rbs_dir = root_and_seed(source, opts[:input], ruby_source, c_path)
 
-      emitted = SpinelRunner.new(rbs_dir: rbs_dir).emit(rooted_path, c_path)
+      emitted = SpinelRunner.new(rbs_dir: rbs_dir,
+                                 ext_init: Suppify.kernel_init_name(opts[:lib_name]),
+                                 ext_entries: source.ext_entries).emit(rooted_path, c_path)
       result = Pipeline.new(
         ruby_source: ruby_source,
         c_source: File.read(emitted[:c_path]),
+        header_text: File.read(emitted[:header_path]),
         symbols_json: File.read(emitted[:symbols_path]),
         lib_name: opts[:lib_name],
+        rbs_signatures: source.public_methods.empty? ? {} : source.export_signatures,
       ).run
 
       case opts[:target]
@@ -136,29 +141,40 @@ module Suppify
       $stdout.puts "wrote #{kind} gem at #{gem_dir} (#{result[:exports].length} exports)"
     end
 
-    # spinel DCEs any top-level method with no call site, regardless of
-    # visibility, so public methods (the very ones suppify must export) get
-    # silently dropped from the generated C unless something calls them. This
-    # writes a "rooted" copy of the source with one synthetic, RBS-typed call
-    # per public method appended (see Source#rooted_source), so spinel's
-    # reachability analysis keeps them. Returns [rooted_rb_path, rbs_dir_or_nil].
-    def root_and_seed(input_path, ruby_source, c_path)
+    # The analyzed input: the Ruby plus the .rbs sidecar next to it, when
+    # there is one. A sidecar is optional -- the method types can be written
+    # inline above each def instead (Source merges the two and rejects a
+    # method declared in both).
+    def build_source(input_path, ruby_source, lib_name = nil)
+      rbs_path = input_path.sub(/\.rb\z/, ".rbs")
+      Source.new(ruby_source, rbs_source: File.exist?(rbs_path) ? File.read(rbs_path) : nil, lib_name: lib_name)
+    end
+
+    # spinel's --ext-entry exports only `Module.method` names and DCEs a
+    # top-level method nothing calls, so the compiled copy of the source
+    # gets a wrapper module (Source#rooted_source) whose entries delegate to
+    # each public method. Its signatures reach spinel through the --rbs seed:
+    # the wrapper's RBS (Source#wrapper_rbs_text) plus the input's own
+    # sidecar and inline annotations, in one seed directory. spinel's --rbs
+    # seed is a directory of .rbs files, all of which it reads, and it merges
+    # several `class Object` blocks.
+    # Returns [rooted_rb_path, rbs_dir_or_nil].
+    def root_and_seed(source, input_path, ruby_source, c_path)
       rooted_path = c_path.sub(/\.c\z/, ".rooted.rb")
-      source = Source.new(ruby_source)
       if source.public_methods.empty?
         File.write(rooted_path, ruby_source)
         return [rooted_path, nil]
       end
 
-      rbs_path = input_path.sub(/\.rb\z/, ".rbs")
-      unless File.exist?(rbs_path)
-        raise Error, "missing RBS sidecar #{rbs_path} (needed to type-export " \
-                     "public method(s): #{source.public_methods.join(', ')})"
-      end
-
-      source = Source.new(ruby_source, rbs_source: File.read(rbs_path))
-      File.write(rooted_path, source.rooted_source)
-      [rooted_path, File.dirname(File.expand_path(rbs_path))]
+      File.write(rooted_path, source.rooted_source) # raises, naming them, if a type is missing
+      seed_dir = File.join(File.dirname(rooted_path), "rbs")
+      FileUtils.rm_rf(seed_dir)
+      FileUtils.mkdir_p(seed_dir)
+      Dir[File.join(File.dirname(File.expand_path(input_path)), "*.rbs")].each { |f| FileUtils.cp(f, seed_dir) }
+      inline = source.inline_rbs_text
+      File.write(File.join(seed_dir, "_suppify_inline.rbs"), inline) if inline
+      File.write(File.join(seed_dir, "_suppify_wrapper.rbs"), source.wrapper_rbs_text)
+      [rooted_path, seed_dir]
     end
   end
 end

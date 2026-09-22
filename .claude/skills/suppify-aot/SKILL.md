@@ -22,11 +22,13 @@ doing anything, confirm the target method is:
   A scalar called once per iteration hides the speedup under that cost. A method that
   loops many times *inside one call* (pass a count/buffer, compute in bulk) amortizes it.
   Same kernel, ESP32: ~4× at 1 iter/call → ~150× at 4096 iters/call.
-- **flat scalars in / scalar out**, no allocation. Supported types are `Integer`,
-  `Float`, `String`, `Symbol`, `bool`, `nil`, `void` (return). No `Array`/`Hash`/objects
-  across the boundary. Allocation drags in spinel's GC and its RAM. On a 32-bit MCU,
-  boundary values must fit 32 bits — pack wider results yourself (see the project's
-  README "32bit" notes).
+- **flat scalars in / scalar out**, no allocation. The method the VM calls is wrapped
+  only when its types are `Integer`, `Float`, `String`, `bool`, `nil`, `void` (return);
+  a method taking or returning `Array`/`Hash`/`Symbol` gets no VM binding at all — it is
+  reachable only through the flat MessagePack entry (`<lib>_<m>_call`, for callers with
+  no Ruby VM), and decoding one allocates, which drags in spinel's GC and its RAM. On a
+  32-bit MCU, boundary values must fit 32 bits — pack wider results yourself (see the
+  project's README "32bit" notes).
 
 If it fails these, say so and stop — suppify won't help this method.
 
@@ -36,23 +38,22 @@ Create a TodoWrite item per step.
 
 ### 1. Pick the kernel and extract it to a standalone source
 
-The suppify input is a plain-Ruby file with the method(s) as **public top-level defs**
-and a `.rbs` sidecar next to it. This same file is also the interpreted baseline — do
+The suppify input is a plain-Ruby file with the method(s) as **public top-level defs**,
+each carrying an RBS method type. This same file is also the interpreted baseline — do
 not fork the body.
 
 ```ruby
 # kernel.rb  — the single source of truth for the kernel
+#: (Integer, Integer) -> Integer
 def mykernel(seed, n)
   # ... integer/float work, bounded loop, no allocation ...
 end
 ```
 
-```
-# kernel.rbs  — required: spinel drops uncalled top-level methods without a signature
-class Object
-  def mykernel: (Integer, Integer) -> Integer
-end
-```
+The `#:` comment is required in the sense that spinel drops uncalled top-level methods
+without a signature. A `kernel.rbs` sidecar next to `kernel.rb` does the same job if you
+prefer a separate file (declare the methods under `class Object`) — but not both for the
+same method.
 
 Leave the original project code that *calls* this method untouched. If the method
 currently lives inline in the app, move its body verbatim into `kernel.rb` and have the

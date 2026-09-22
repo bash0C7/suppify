@@ -120,3 +120,64 @@ class TestCLIEmitGem < Test::Unit::TestCase
     end
   end
 end
+
+# How the CLI feeds spinel's --rbs seeding. A .rbs sidecar is no longer
+# required: the method types can be written inline above each def, and
+# suppify renders those into a seed file of their own (spinel reads every
+# .rbs in the directory it is pointed at).
+class TestCLISeeding < Test::Unit::TestCase
+  INLINE = "#: (Integer) -> Integer\ndef f(a) = a\n"
+
+  def seed(dir, ruby, sidecar: nil)
+    rb = File.join(dir, "k.rb")
+    File.write(rb, ruby)
+    File.write(File.join(dir, "k.rbs"), sidecar) if sidecar
+    source = Suppify::CLI.build_source(rb, ruby)
+    [source, *Suppify::CLI.root_and_seed(source, rb, ruby, File.join(dir, "tmp", "k.c"))]
+  end
+
+  def test_inline_only_source_needs_no_sidecar
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "tmp"))
+      _source, rooted, rbs_dir = seed(dir, INLINE)
+      assert_match(/if false\n  SuppiExport\.suppi_f\(0\)\n/, File.read(rooted))
+      assert_match(/def f: \(Integer\) -> Integer/,
+                   File.read(File.join(rbs_dir, "_suppify_inline.rbs")))
+    end
+  end
+
+  # A sidecar is copied into the seed directory unchanged (so declarations
+  # for the user's own classes still reach spinel), beside the wrapper
+  # module's RBS.
+  def test_sidecar_is_copied_into_the_seed_beside_the_wrapper_rbs
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "tmp"))
+      sidecar = "class Object\n  def f: (Integer) -> Integer\nend\n"
+      _source, _rooted, rbs_dir = seed(dir, "def f(a) = a\n", sidecar: sidecar)
+      assert_equal sidecar, File.read(File.join(rbs_dir, "k.rbs"))
+      assert_match(/def self\.suppi_f: \(Integer\) -> Integer/,
+                   File.read(File.join(rbs_dir, "_suppify_wrapper.rbs")))
+    end
+  end
+
+  # A mixed source seeds both: the sidecar is copied next to the rendered
+  # inline declarations, and spinel merges the two `class Object` blocks.
+  def test_mixed_source_seeds_both_forms
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "tmp"))
+      sidecar = "class Object\n  def g: (String) -> String\nend\n"
+      _source, _rooted, rbs_dir = seed(dir, INLINE + "def g(s) = s\n", sidecar: sidecar)
+      seeded = Dir[File.join(rbs_dir, "*.rbs")].map { |f| File.read(f) }.join
+      assert_match(/def f: \(Integer\) -> Integer/, seeded)
+      assert_match(/def g: \(String\) -> String/, seeded)
+    end
+  end
+
+  def test_public_method_with_no_signature_anywhere_raises
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, "tmp"))
+      e = assert_raise(Suppify::Error) { seed(dir, "def lonely(a) = a\n") }
+      assert_match(/lonely/, e.message)
+    end
+  end
+end

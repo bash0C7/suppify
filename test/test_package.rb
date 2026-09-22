@@ -11,7 +11,7 @@ class TestRuntimeSources < Test::Unit::TestCase
     assert_includes s, "sp_gc.c"
     assert_includes s, "sp_str.c"
     assert_includes s, "regexp/re_compile.c"
-    assert_equal 31, s.length
+    assert_equal 32, s.length
   end
 
   # copy_flat flattens every runtime .c and every header into one dir (so a
@@ -34,6 +34,40 @@ class TestRuntimeSources < Test::Unit::TestCase
       assert File.exist?(File.join(dest, "sp_gc.c"))
       assert File.exist?(File.join(dest, "re_compile.c"))
       assert File.exist?(File.join(dest, "spinel_rt.h"))
+    end
+  end
+
+  # sp_ctx_swap is defined inside an asm string, where the prelude's #define
+  # cannot reach, so copy_flat renames it textually -- every spelling: the
+  # ELF label, the Mach-O leading-underscore label, the ucontext fallback
+  # definition, the prototype and the call sites -- to <lib>_sp_ctx_swap.
+  def test_copy_flat_renames_sp_ctx_swap_in_sources_and_headers_when_given_a_lib_name
+    Dir.mktmpdir do |root|
+      lib = File.join(root, "lib")
+      FileUtils.mkdir_p(File.join(lib, "regexp"))
+      Suppify::RuntimeSources::SOURCES.each { |rel| File.write(File.join(lib, rel), "/* #{rel} */") }
+      File.write(File.join(lib, "sp_fiber.c"), <<~C)
+        #define SP_CTX_SYM "_sp_ctx_swap"
+        #define SP_CTX_SYM2 "sp_ctx_swap"
+        __asm__(".globl " SP_CTX_SYM "\n" "_sp_ctx_swap:\n");
+        void sp_ctx_swap(sp_fiber_ctx *from, sp_fiber_ctx *to) { swapcontext(&from->uc, &to->uc); }
+        void g(void) { sp_ctx_swap(&a, &b); }
+      C
+      File.write(File.join(lib, "sp_fiber_ctx.h"), "void sp_ctx_swap(sp_fiber_ctx *from, sp_fiber_ctx *to);\n")
+      File.write(File.join(lib, "regexp", "re_internal.h"), "/* h */")
+
+      dest = File.join(root, "out")
+      Suppify::RuntimeSources.copy_flat(lib, dest, lib_name: "kl")
+      fiber = File.read(File.join(dest, "sp_fiber.c"))
+      assert_no_match(/(?<![A-Za-z0-9])sp_ctx_swap/, fiber.gsub("kl_sp_ctx_swap", ""))
+      assert_includes fiber, '"_kl_sp_ctx_swap"'
+      assert_includes fiber, '"kl_sp_ctx_swap"'
+      assert_includes fiber, "void kl_sp_ctx_swap(sp_fiber_ctx"
+      assert_includes fiber, "kl_sp_ctx_swap(&a, &b);"
+      assert_includes File.read(File.join(dest, "sp_fiber_ctx.h")), "void kl_sp_ctx_swap("
+
+      Suppify::RuntimeSources.copy_flat(lib, File.join(root, "plain"))
+      assert_includes File.read(File.join(root, "plain", "sp_fiber.c")), "void sp_ctx_swap("
     end
   end
 
@@ -121,6 +155,19 @@ class TestSymbolPrefix < Test::Unit::TestCase
     refute_includes symbols, "sp_ctx_swap"
   end
 
+  # The user-defined exception class table is emitted into the GENERATED TU
+  # (<lib>_gen.c), not the vendored runtime, so compiling lib/*.c only ever
+  # sees it as an undefined reference and it went unprefixed -- a duplicate
+  # symbol as soon as two suppify libraries met in one binary. It is added
+  # to the rename set explicitly.
+  def test_discover_runtime_symbols_includes_the_generated_tus_own_globals
+    omit("spinel not on PATH / SPINEL_LIB unset") unless spinel_lib_available?
+
+    symbols = Suppify::SymbolPrefix.discover_runtime_symbols(ENV["SPINEL_LIB"])
+    assert_includes symbols, "sp_exc_subclass_count"
+    assert_includes symbols, "sp_exc_subclass_ids"
+  end
+
   private
 
   def spinel_lib_available?
@@ -144,7 +191,7 @@ class TestEmitterCArchive < Test::Unit::TestCase
       cmds = []
       fake_runner = ->(argv) { cmds << argv; ["", 0] }
       fake_discover = ->(lib) { lib == "/opt/spinel/lib" ? %w[sp_gc_alloc] : raise("wrong lib") }
-      fake_copy_runtime = lambda do |_lib, dest|
+      fake_copy_runtime = lambda do |_lib, dest, **|
         FileUtils.mkdir_p(dest)
         FileUtils.touch(File.join(dest, "sp_gc.c"))
         { sources: ["sp_gc.c"] }
@@ -174,7 +221,7 @@ class TestEmitterCArchive < Test::Unit::TestCase
   def test_cc_failure_raises
     fake = ->(_argv) { ["err", 1] }
     discover = ->(_lib) { [] }
-    copy_runtime = lambda do |_lib, dest|
+    copy_runtime = lambda do |_lib, dest, **|
       FileUtils.mkdir_p(dest)
       { sources: [] }
     end

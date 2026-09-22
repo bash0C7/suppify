@@ -1,10 +1,27 @@
 # HANDOFF — suppify
 
+## spinel library output (`--ext-init` / `--ext-entry`) in suppify
+
+Verified against spinel 4a28d45 by running it; suppify uses the library output wherever it provides one.
+
+Replaced by spinel's contract:
+- Init: `int main` rename + `sp_lib_init` driving `sp__main` -> spinel's `<lib>_spinel()` (`--ext-init`). `<lib>_init` stays as a once-guard around it.
+- Exception capture: the per-call `setjmp` / `sp_exc_arm` / `sp_exc_disarm` / `sp_gc_nroots` snapshot -> `<lib>_spinel_try(fn, ctx, &cls, &msg)`. suppify still copies `msg` into its own buffer, so `<lib>_error_message()` outlives the next call; the class name likewise goes to `<lib>_error_class()` (empty when the last call did not raise).
+- Signature source: `SignatureExtractor` now reads the emitted header's declarations (`ret name(params);`) instead of definition lines in the C body. The same parser, a stable contract.
+
+Stays, and why (evidence from running spinel):
+- Wrapper module. (a) `--ext-entry add` is refused ("spell it Module.method"), `Object.add` is refused ("does not name a `def self.add`"). So suppify appends `module SuppiExport_<lib>` with `def self.suppi_<m>` delegating to the top-level `<m>`, only in the compiled copy: the user's file is untouched and runs under CRuby as before. The module name is per library because the entry symbol is `sp_<Module>_s_<m>` (external), which collides across libraries otherwise.
+- Dead call-site literals. (c) The RBS seed alone types Array/Hash[String,Integer]/Hash[Symbol,Float]/Symbol/nested/Integer? parameters, but `Hash[Integer, Integer]` stays `sp_RbVal` without a call site; a dead `SuppiExport_<lib>.suppi_m(<literals>)` gives it `sp_IntIntHash *`. Wrapper RBS is seeded too (`_suppify_wrapper.rbs`), else the wrapper's parameters are `sp_RbVal`.
+- MessagePack marshalling (`FlatCall` decoders / generic encoder), status codes, neutral scalar entries, string dup + `SP_GC_ROOT`, `<lib>_str_len`, bindings. spinel's header states C types (`sp_IntArray *`, `sp_StrIntHash *`, `sp_sym`, `sp_PolyArray *`, `sp_SymPolyHash *`, `sp_int` for `Integer?`) but nothing converts to or from bytes.
+- `--emit-symbol-map`: still how suppify maps `SuppiExport_<lib>.suppi_<m>` to the C name (mangling such as `?` -> `_p`).
+
+Per-library namespacing (b): the ext-init TU defines four more external symbols (`sp_sym_to_s`, `sp_sym_intern`, `sp_sym_intern_n`, `sp_class_to_s`); they are in `SymbolPrefix::GENERATED_TU_SYMBOLS`. `test/test_two_libraries_integration.rb` asserts two archives share only `sp_ctx_swap`, and links two libraries into one binary driven from two threads. `sp_ctx_swap` (asm-string symbol, README) is renamed in one archive with `llvm-objcopy` for that test only.
+
 ## spinel pin 更新（完了）
 
-状態: **完了**。`spinel.pin` を `e52019d6`（2026-07-19）から `d0feb620`（2026-09-14, upstream
-master HEAD）へ更新し、`rake spinel:check_pin[d0feb620...]` が実 spinel クローン+ビルド+picoruby
-実リンクまで含めて 100% green（129 tests, 326 assertions, 0 failures/errors）。
+状態: **完了**。`spinel.pin` は `4a28d45f`（matz/spinel）。`rake spinel:check_pin[4a28d45f...]` が実 spinel
+クローン+ビルド+picoruby 実リンクまで含めて 100% green（204 tests, 625 assertions, 0 failures/errors）、
+runtime source drift なし。
 
 見つかった実差分（すべて修正済み、コミット済み）:
 
@@ -16,7 +33,9 @@ master HEAD）へ更新し、`rake spinel:check_pin[d0feb620...]` が実 spinel 
   同名文字列は無関係（mruby VM 側 API の型名で、意図的に変更していない）。
 - **`RT_MEMBERS` の増加**: upstream が `sp_slab sp_dtoa sp_hash sp_proc sp_exc sp_random
   sp_process sp_process_status` の 8 ファイルを追加。`lib/suppify/package.rb` の
-  `RuntimeSources::SOURCES`（23→31 件）を追従。
+  `RuntimeSources::SOURCES` を追従。さらに `sp_iobuffer`（`sp_exc.c` / `sp_bigint.c` が
+  `sp_iobuffer.h` を参照する）が加わり、`SOURCES` に `sp_iobuffer.c` を追加。header は `copy_flat` が
+  `lib/*.h` を glob するので追加不要、`SymbolPrefix` の discovery は自動で prefix する（`nm` で確認済み）。
 - **`test/test_picoruby_target_integration.rb` の別件バグ（spinel と無関係）**: picoruby 本体の
   `conf.picoruby` が `alloc_estalloc: true` を既定にした（`picoruby-machine` の estalloc 実装が
   前提）ため、`picoruby-machine` を含まないこのテストの最小 host build がリンクエラーになった。
