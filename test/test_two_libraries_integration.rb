@@ -121,7 +121,7 @@ class TestTwoLibrariesIntegration < Test::Unit::TestCase
 
   def defined_globals(archive)
     IO.popen(["nm", "-g", "--defined-only", archive], err: File::NULL, &:read).lines
-      .filter_map { |l| l.split[2]&.sub(/\A_/, "") }
+      .filter_map { |l| n = l.split[2]; n && (RbConfig::CONFIG["host_os"].include?("darwin") ? n.sub(/\A_/, "") : n) }
   end
 
   # Nothing external is defined by both archives: every runtime and kernel
@@ -143,7 +143,7 @@ class TestTwoLibrariesIntegration < Test::Unit::TestCase
     Dir.mktmpdir("suppify-two-") do |dir|
       build(dir)
       Dir.chdir(dir) do
-        assert system("cc driver.c -I. -L. -lka -lkb -lm -lpthread -o driver 2>link.log"),
+        assert system("cc driver.c -I. -L. -lka -lkb #{SYS_LIBS} -lpthread -o driver 2>link.log"),
                "the two libraries must link into one binary:\n#{File.read('link.log')}"
         assert_equal "OK\n", `./driver`
       end

@@ -28,7 +28,7 @@ module Suppify
       IN = {
         int:    ->(v) { "(intptr_t)NUM2LONG(#{v})" },
         float:  ->(v) { "NUM2DBL(#{v})" },
-        string: ->(v) { "StringValueCStr(#{v})" },
+        string: ->(v) { "RSTRING_PTR(#{v})" },
         bool:   ->(v) { "(RTEST(#{v}) ? 1 : 0)" },
       }.freeze
 
@@ -64,6 +64,11 @@ module Suppify
         ret_kind  = NeutralType.kind(sig.return_type)
 
         b = +"static VALUE suppi_rb_#{name}(#{siglist}) {\n"
+        params.each_with_index do |(t, _), i|
+          next unless NeutralType.kind(t) == :string
+          b << "    StringValue(a#{i});\n"
+          b << "    #{lib_name}_set_arg_len(#{i}, (size_t)RSTRING_LEN(a#{i}));\n"
+        end
         if ret_kind == :void
           b << "    #{name}(#{call_args.join(', ')});\n"
         else
@@ -98,7 +103,7 @@ module Suppify
       GET = {
         int:    { fmt: "i", type: "mrb_int" },
         float:  { fmt: "f", type: "mrb_float" },
-        string: { fmt: "z", type: "const char *" },
+        string: { fmt: "s", type: "const char *" },
         bool:   { fmt: "b", type: "mrb_bool" },
       }.freeze
 
@@ -141,8 +146,9 @@ module Suppify
         unless params.empty?
           b << "    #{decls(kinds)}\n"
           fmt  = kinds.map { |k| GET[k][:fmt] }.join
-          addrs = kinds.each_index.map { |i| "&a#{i}" }.join(", ")
+          addrs = kinds.each_index.map { |i| kinds[i] == :string ? "&a#{i}, &a#{i}_len" : "&a#{i}" }.join(", ")
           b << "    mrb_get_args(mrb, \"#{fmt}\", #{addrs});\n"
+          kinds.each_index { |i| b << "    #{lib_name}_set_arg_len(#{i}, (size_t)a#{i}_len);\n" if kinds[i] == :string }
         end
         call_args = kinds.each_index.map { |i| "#{CAST[kinds[i]]}a#{i}" }.join(", ")
         if ret_kind == :void
@@ -163,7 +169,9 @@ module Suppify
         kinds.each_index.map do |i|
           type = GET[kinds[i]][:type]
           sep = type.end_with?("*") ? "" : " "
-          "#{type}#{sep}a#{i};"
+          decl = "#{type}#{sep}a#{i};"
+          decl += " mrb_int a#{i}_len;" if kinds[i] == :string
+          decl
         end.join(" ")
       end
 
@@ -248,6 +256,7 @@ module Suppify
         kinds.each_index { |i| b << arg_check(i, kinds[i]) }
         decls = kinds.each_index.map { |i| decl(i, kinds[i]) }.join(" ")
         b << "    #{decls}\n" unless decls.empty?
+        kinds.each_index { |i| b << "    #{lib_name}_set_arg_len(#{i}, (size_t)v[#{i + 1}].string->size);\n" if kinds[i] == :string }
         call_args = kinds.each_index.map { |i| "#{CAST[kinds[i]]}a#{i}" }.join(", ")
         if ret_kind == :void
           b << "    #{name}(#{call_args});\n"

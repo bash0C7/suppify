@@ -1389,6 +1389,7 @@ module Suppify
       out << "static char g_suppi_msgbuf[256];\n"
       out << "static const char *g_suppi_cls = \"\";\n"
       out << "static char g_suppi_clsbuf[128];\n"
+      out << arg_len_state
       out << capture
       out << call_ctx
       exports.each { |e| out << trampoline(e) << "\n" }
@@ -1396,6 +1397,7 @@ module Suppify
       out << "const char *#{@lib_name}_error_message(void) { return g_suppi_msg; }\n"
       out << "const char *#{@lib_name}_error_class(void) { return g_suppi_err ? g_suppi_cls : \"\"; }\n"
       out << str_len_bridge
+      out << arg_len_setter
       out << lib_init
       out
     end
@@ -1438,6 +1440,7 @@ module Suppify
       name = e["public"]
       try  = "#{Suppify.kernel_init_name(@lib_name)}_try"
       fields = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n};" }
+      sig.params.each { |t, n| fields << "size_t #{n}__len; int #{n}__has;" if NeutralType.kind(t) == :string }
       fields << "#{ret} r;" unless ret == "void"
       fields << "int unused;" if fields.empty?
       ps = sig.params.map { |t, n| "#{NeutralType.map(t)} #{n}" }
@@ -1452,6 +1455,11 @@ module Suppify
       body << "    suppi_sc_#{name} c; const char *cls, *msg;\n"
       body << "    g_suppi_err = 0;\n"
       sig.params.each { |_, n| body << "    c.#{n} = #{n};\n" }
+      sig.params.each_with_index do |(t, n), i|
+        next unless NeutralType.kind(t) == :string
+        body << (i < 32 ? "    c.#{n}__has = (int)((g_suppi_arg_len_set >> #{i}) & 1u); c.#{n}__len = g_suppi_arg_len[#{i}];\n" : "    c.#{n}__has = 0; c.#{n}__len = 0;\n")
+      end
+      body << "    g_suppi_arg_len_set = 0;\n"
       body << "    if (#{try}(suppi_sc_thunk_#{name}, &c, &cls, &msg)) { suppi__capture(cls, msg); return#{ret == 'void' ? '' : ' 0'}; }\n"
       body << "    return#{ret == 'void' ? '' : ' c.r'};\n}\n"
       body
@@ -1469,11 +1477,32 @@ module Suppify
     # allocating, and a fresh string starts unmarked). SP_GC_ROOT is the same
     # discipline spinel's own codegen uses for its local variables, so each
     # duped string is declared as a named local and rooted immediately.
+    #
+    # A binding that knows the byte length (a VM String may hold 0x00)
+    # publishes it with <lib>_set_arg_len before the call; the dup then copies
+    # exactly that many bytes. A plain C caller publishes nothing and gets the
+    # strlen copy.
     def string_arg(body, t, n, expr)
       return expr unless NeutralType.kind(t) == :string
       dup = "sp_dup_#{n}"
-      body << "    const char *#{dup} = sp_str_dup_external(#{expr}); SP_GC_ROOT(#{dup});\n"
+      body << "    const char *#{dup} = #{expr}__has ? sp_str_from_bytes(#{expr}, #{expr}__len) : sp_str_dup_external(#{expr}); SP_GC_ROOT(#{dup});\n"
       dup
+    end
+
+    # Byte lengths published for the next call's String arguments, by
+    # parameter index. One call consumes (and clears) them.
+    def arg_len_state
+      "#define SUPPI_ARG_LEN_MAX 32\nstatic size_t g_suppi_arg_len[SUPPI_ARG_LEN_MAX];\nstatic uint32_t g_suppi_arg_len_set = 0;\n"
+    end
+
+    def arg_len_setter
+      <<~C
+        void #{@lib_name}_set_arg_len(int index, size_t len) {
+            if (index < 0 || index >= SUPPI_ARG_LEN_MAX) return;
+            g_suppi_arg_len[index] = len;
+            g_suppi_arg_len_set |= (uint32_t)1u << index;
+        }
+      C
     end
 
     # rb_str_new_cstr/mrb_str_new_cstr are strlen-based, silently truncating
@@ -1519,7 +1548,9 @@ module Suppify
       out << "int #{@lib_name}_error(void);\n"
       out << "const char *#{@lib_name}_error_message(void);\n"
       out << "const char *#{@lib_name}_error_class(void);\n"
-      out << "size_t #{@lib_name}_str_len(const char *s);\n\n"
+      out << "size_t #{@lib_name}_str_len(const char *s);\n"
+      out << "/* Byte length of the next call's String argument at index (0-based);\n   without it the argument is read up to its first NUL. */\n"
+      out << "void #{@lib_name}_set_arg_len(int index, size_t len);\n\n"
       exports.select { |e| e["neutral"] }.each do |e|
         sig = e["sig"]
         ret = NeutralType.map(sig.return_type)

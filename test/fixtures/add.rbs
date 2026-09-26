@@ -8,4 +8,5 @@ class Object
   def cat: (String, String) -> String
   def nully: () -> String
   def frozen_nully: () -> String
+  def blen: (String) -> Integer
 end

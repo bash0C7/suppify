@@ -672,7 +672,7 @@ class TestPipeline < Test::Unit::TestCase
   # straight into a spinel-generated function is an out-of-bounds read.
   # sp_str_dup_external mirrors what spinel itself does for argv/getenv.
   def test_wraps_string_arguments_in_sp_str_dup_external
-    assert_match(/const char \*sp_dup_name = sp_str_dup_external\(c->name\);/, @c)
+    assert_match(/const char \*sp_dup_name = c->name__has \? sp_str_from_bytes\(c->name, c->name__len\) : sp_str_dup_external\(c->name\);/, @c)
     assert_match(/c->r = sp_greet\(sp_dup_name\);/, @c)
     # non-string args must be passed through unwrapped
     assert_match(/c->r = sp_add\(c->a, c->b\);/, @c)
@@ -686,9 +686,20 @@ class TestPipeline < Test::Unit::TestCase
   # own codegen uses for its local variables) keeps each duped string alive
   # from the moment it's created.
   def test_roots_each_duped_string_before_the_next_dup
-    assert_match(/const char \*sp_dup_a = sp_str_dup_external\(c->a\); SP_GC_ROOT\(sp_dup_a\);/, @c)
-    assert_match(/const char \*sp_dup_b = sp_str_dup_external\(c->b\); SP_GC_ROOT\(sp_dup_b\);/, @c)
+    assert_match(/const char \*sp_dup_a = [^;]*sp_str_dup_external\(c->a\); SP_GC_ROOT\(sp_dup_a\);/, @c)
+    assert_match(/const char \*sp_dup_b = [^;]*sp_str_dup_external\(c->b\); SP_GC_ROOT\(sp_dup_b\);/, @c)
     assert_match(/c->r = sp_cat\(sp_dup_a, sp_dup_b\);/, @c)
+  end
+
+  # A binding that knows a String argument's byte length publishes it with
+  # <lib>_set_arg_len; the trampoline carries it (per parameter index) into
+  # the thunk and clears it, so it applies to exactly one call.
+  def test_published_arg_lengths_reach_the_dup_and_are_consumed
+    assert_match(/void addlib_set_arg_len\(int index, size_t len\)/, @c)
+    assert_match(/c\.a__has = \(int\)\(\(g_suppi_arg_len_set >> 0\) & 1u\); c\.a__len = g_suppi_arg_len\[0\];/, @c)
+    assert_match(/c\.b__has = \(int\)\(\(g_suppi_arg_len_set >> 1\) & 1u\); c\.b__len = g_suppi_arg_len\[1\];/, @c)
+    greet = @c[/const char \* greet\(const char \* name\) \{.*?\n\}/m]
+    assert_match(/g_suppi_arg_len_set = 0;/, greet)
   end
 
   # SP_GC_ROOT's cleanup-attribute pop never runs across a longjmp, so a

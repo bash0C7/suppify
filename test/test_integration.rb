@@ -37,6 +37,15 @@ class TestIntegration < Test::Unit::TestCase
               /* strlen(nully()) would report 1 (truncated at the embedded
                  NUL); the str_len bridge recovers the real byte length. */
               printf("%zu\\n", addlib_str_len(nully()));
+              /* A String argument is read up to its first NUL unless its byte length
+                 was published for this call; the published length is consumed by it. */
+              printf("%ld\\n", (long)blen("a\\0b"));
+              addlib_set_arg_len(0, 3);
+              printf("%ld\\n", (long)blen("a\\0b"));
+              printf("%ld\\n", (long)blen("a\\0b"));
+              addlib_set_arg_len(0, 3);
+              addlib_set_arg_len(1, 2);
+              printf("%zu\\n", addlib_str_len(cat("a\\0b", "\\0c")));
               boom();
               printf("%d\\n", addlib_error());
               return 0;
@@ -44,7 +53,7 @@ class TestIntegration < Test::Unit::TestCase
         C
         # Self-contained: lib<name>.a bundles a per-library-namespaced copy of
         # the spinel runtime, so no separate -lspinel_rt is needed.
-        ok = system("cc harness.c -I. -L. -laddlib -lm -o harness")
+        ok = system("cc harness.c -I. -L. -laddlib #{SYS_LIBS} -o harness")
         assert ok, "harness failed to compile/link"
         out = `./harness`.strip.split("\n")
         assert_equal "5", out[0]
@@ -54,6 +63,10 @@ class TestIntegration < Test::Unit::TestCase
         assert_equal "0", out[4]
         assert_equal "3", out[5]
         assert_equal "1", out[6]
+        assert_equal "3", out[7]
+        assert_equal "1", out[8]
+        assert_equal "5", out[9]
+        assert_equal "1", out[10]
       end
     end
   end

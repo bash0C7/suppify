@@ -69,7 +69,7 @@ class TestErrorClassIntegration < Test::Unit::TestCase
       File.write(File.join(dir, "driver.c"), DRIVER)
       Dir.chdir(dir) do
         Suppify::CLI.run(["errkernel.rb", "-o", "errlib"])
-        assert system("cc driver.c -I. -L. -lerrlib -lm -o driver 2>link.log"), File.read("link.log")
+        assert system("cc driver.c -I. -L. -lerrlib #{SYS_LIBS} -o driver 2>link.log"), File.read("link.log")
         lines = `./driver`.lines.map(&:chomp)
         assert_equal "start rc=0 err=0 class=[] msg=[]", lines[0]
         assert_equal "custom rc=-3 err=1 class=[KernelError] msg=[custom -1]", lines[1]

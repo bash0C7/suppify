@@ -7,3 +7,4 @@ def truthy(flag) = flag
 def cat(a, b) = a + b
 def nully = "a\0b"
 def frozen_nully = "a\0b".freeze
+def blen(s) = s.bytesize

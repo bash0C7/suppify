@@ -530,4 +530,12 @@ class TestEmitterPicoRubyGem < Test::Unit::TestCase
       assert_match(/mrbc_addlib_init/, File.read(stub))
     end
   end
+
+  # Mach-O puts an extra "_" in front of every C symbol; ELF does not, so a
+  # leading "_" there belongs to the identifier and has to survive.
+  def test_parse_nm_strips_the_mach_o_underscore_only_on_mach_o
+    nm = "0000000000000000 B _sp_ret_strbuf\n0000000000000010 T sp_str_alloc\n0000000000000020 t local_helper\n"
+    assert_equal %w[_sp_ret_strbuf sp_str_alloc], Suppify::SymbolPrefix.parse_nm(nm, mach_o: false)
+    assert_equal %w[sp_ret_strbuf sp_str_alloc], Suppify::SymbolPrefix.parse_nm(nm, mach_o: true)
+  end
 end

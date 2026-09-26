@@ -45,7 +45,7 @@ class TestFlatCallIntegration < Test::Unit::TestCase
     Dir.chdir(dir) { Suppify::CLI.run(["flat.rb", "-o", "flatlib"]) }
     File.write(File.join(dir, "driver.c"), driver_source)
     Dir.chdir(dir) do
-      assert system("cc driver.c -I. -L. -lflatlib -lm -o driver"), "driver failed to build"
+      assert system("cc driver.c -I. -L. -lflatlib #{SYS_LIBS} -o driver"), "driver failed to build"
     end
     self.class.build_dir = dir
   end

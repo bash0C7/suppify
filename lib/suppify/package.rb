@@ -7,6 +7,7 @@
 # picoruby mrbgem).
 require "fileutils"
 require "open3"
+require "rbconfig"
 require "tmpdir"
 require "suppify/bindings"
 
@@ -107,9 +108,12 @@ module Suppify
     # to rename has no effect.
     # With --ext-init the generated TU also defines the symbol/class lookups
     # (sp_sym_to_s, ...) as external symbols instead of statics.
+    # _sp_proc_poly_ret / _sp_proc_poly_args (Proc call slots) are declared
+    # extern by the runtime and defined by the generated TU.
     GENERATED_TU_SYMBOLS = %w[
       sp_exc_subclass_count sp_exc_subclass_ids
       sp_sym_to_s sp_sym_intern sp_sym_intern_n sp_class_to_s
+      _sp_proc_poly_ret _sp_proc_poly_args
     ].freeze
 
     # spinel_rt.h -- included only by each generated program's own TU, not
@@ -151,13 +155,15 @@ module Suppify
     # nm output is "<addr> <type> <name>"; an uppercase type letter means
     # external linkage (what we must rename), lowercase means file-local
     # (already collision-safe, left alone). Mach-O (macOS) prefixes every
-    # symbol with an extra "_" that isn't part of the C identifier.
-    def parse_nm(output)
+    # symbol with an extra "_" that isn't part of the C identifier; ELF does
+    # not, so there a leading "_" is the identifier's own (spinel's
+    # _sp_ret_strbuf, _sp_proc_poly_args, ...) and must stay.
+    def parse_nm(output, mach_o: RbConfig::CONFIG["host_os"].include?("darwin"))
       names = []
       output.each_line do |line|
         addr, type, name = line.split
         next unless addr && type && name && type =~ /\A[A-Z]\z/
-        names << name.sub(/\A_/, "")
+        names << (mach_o ? name.sub(/\A_/, "") : name)
       end
       names.uniq.sort
     end
@@ -395,6 +401,9 @@ module Suppify
             spec.cc.include_paths << "\#{dir}/include"
             # libm for the spinel runtime's math (harmless where libm is in libc).
             spec.linker.libraries << 'm'
+            # glibc keeps crypt(3) (String#crypt) in libcrypt; a host build on Linux
+            # links it. Cross builds are left alone.
+            spec.linker.libraries << 'crypt' if !build.is_a?(MRuby::CrossBuild) && RbConfig::CONFIG['host_os'].include?('linux')
             # Namespaces every vendored spinel runtime symbol to this library
             # (so a second suppify mrbgem linked into the same firmware image
             # doesn't collide with this one's runtime state) and silences the

@@ -42,7 +42,10 @@ class TestBindingCRuby < Test::Unit::TestCase
   # byte length, so rb_str_new (explicit length) builds the Ruby string with
   # the correct size regardless of embedded NULs.
   def test_string_wrapper
-    assert_match(/greet\(StringValueCStr\(a0\)\)/, @c)
+    # A String argument goes by pointer + length (StringValueCStr raises on
+    # an embedded NUL): the length is published before the call.
+    assert_match(/StringValue\(a0\);\n    addlib_set_arg_len\(0, \(size_t\)RSTRING_LEN\(a0\)\);/, @c)
+    assert_match(/greet\(RSTRING_PTR\(a0\)\)/, @c)
     assert_match(/return rb_str_new\(r, addlib_str_len\(r\)\);/, @c)
   end
 
@@ -114,8 +117,9 @@ class TestBindingMruby < Test::Unit::TestCase
   # tracked byte length, so mrb_str_new (explicit length) builds the mruby
   # string with the correct size regardless of embedded NULs.
   def test_string_wrapper
-    assert_match(/const char \*a0;/, @c)
-    assert_match(/mrb_get_args\(mrb, "z", &a0\);/, @c)
+    assert_match(/const char \*a0; mrb_int a0_len;/, @c)
+    assert_match(/mrb_get_args\(mrb, "s", &a0, &a0_len\);/, @c)
+    assert_match(/addlib_set_arg_len\(0, \(size_t\)a0_len\);/, @c)
     assert_match(/return mrb_str_new\(mrb, r, addlib_str_len\(r\)\);/, @c)
   end
 
@@ -208,6 +212,7 @@ class TestBindingMrubyc < Test::Unit::TestCase
   def test_string_wrapper
     assert_match(/if \(v\[1\]\.tt != MRBC_TT_STRING\)/, @c)
     assert_match(/const char \*a0 = \(const char \*\)v\[1\]\.string->data;/, @c)
+    assert_match(/addlib_set_arg_len\(0, \(size_t\)v\[1\]\.string->size\);/, @c)
     assert_match(/SET_RETURN\(mrbc_string_new\(vm, r, addlib_str_len\(r\)\)\);/, @c)
   end
 
