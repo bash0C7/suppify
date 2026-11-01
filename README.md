@@ -78,20 +78,28 @@ Entries cross the contract in these types:
 | `void` / `nil` (return) | none | `void` |
 
 The kernel calls C through spinel's FFI (`ffi_func`, see spinel's `docs/FFI.md`). suppify
-copies its `ffi_lib` and `ffi_cflags` into the gem's build:
+carries its build settings into the gem:
+
+- **`ffi_cflags` `-I` / `-D`**: added to the gem's compile.
+- **`ffi_lib`**: added to the build's linker libraries. Every binary the PicoRuby build links
+  gets them, and they appear in `libmruby.flags.mak`.
 
 ```ruby
 module Hw
-  ffi_lib "m"
-  ffi_cflags "-DHW_BOARD=1"
-  ffi_func :labs, [:long], :long
+  ffi_lib "hw"
+  ffi_cflags "-I/opt/hw/include"
+  ffi_cflags "-DHW_BOARD=3"
+  ffi_func :hw_scale, [:long], :long
 end
 
 module Ffi
   #: (Integer) -> Integer
-  def self.mag(n) = Hw.labs(n)
+  def self.mag(n) = Hw.hw_scale(n)
 end
 ```
+
+Set the library's directory in your build_config with `conf.linker.library_paths << "/opt/hw/lib"`.
+A firmware that links `libmruby.a` with its own build system links the library there.
 
 ### The gem
 
@@ -186,7 +194,7 @@ The integration tests run when their tools are present:
 | `test_spinel_integration.rb` | spinel (`SPINEL` or `PATH`) |
 | `test_call_integration.rb` | spinel, `cc` |
 | `test_newlib_integration.rb` | spinel, `arm-none-eabi-gcc`, `qemu-arm` |
-| `test_picoruby_integration.rb` | spinel, a PicoRuby checkout in `PICORUBY_ROOT` |
+| `test_picoruby_integration.rb` | spinel, `cc`, a PicoRuby checkout in `PICORUBY_ROOT` |
 
 `rakelib/spinel.rake` tracks `spinel.pin`:
 

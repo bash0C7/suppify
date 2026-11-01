@@ -42,8 +42,9 @@ class TestMrbgem < Test::Unit::TestCase
     assert_include rake, %(spec.license = "Apache-2.0")
     assert_include rake, %(spec.cc.defines.concat(["SP_ONE_STRING", "BOARD=1"]))
     assert_include rake, %(spec.cc.include_paths.concat(["/opt/sdk/include"]))
-    assert_include rake, %(spec.linker.libraries.concat(["m", "esp_timer"]))
-    assert_include rake, %(spec.linker.libraries << "crypt")
+    assert_include rake, %(libs = ["m", "esp_timer"])
+    assert_include rake, %(libs << "crypt")
+    assert_include rake, %(build.linker.libraries.concat(libs - build.linker.libraries))
     assert_not_include rake, "newlib"
   end
 

@@ -66,7 +66,9 @@ module Suppify
         spec.objs << stubs
         file(stubs => "\#{newlib}/sp_newlib.c") { |t| spec.cc.run t.name, t.prerequisites.first }
       RUBY
-      host = 'spec.linker.libraries << "crypt" if !build.is_a?(MRuby::CrossBuild) && RUBY_PLATFORM.include?("linux")'
+      link = ["libs = #{(lib.libs - ['crypt']).inspect}"]
+      link << 'libs << "crypt" if !build.is_a?(MRuby::CrossBuild) && RUBY_PLATFORM.include?("linux")' unless newlib
+      link << "build.linker.libraries.concat(libs - build.linker.libraries)"
       <<~RUBY
         MRuby::Gem::Specification.new(#{"picoruby-#{lib.name}".inspect}) do |spec|
           spec.license = #{license.inspect}
@@ -74,8 +76,7 @@ module Suppify
           spec.summary = #{"#{lib.name}: Ruby compiled by spinel".inspect}
           spec.cc.defines.concat(#{defines.inspect})
           spec.cc.include_paths.concat(#{includes.inspect})
-          spec.linker.libraries.concat(#{(lib.libs - ['crypt']).inspect})
-        #{(newlib ? board : "#{host}\n").gsub(/^/, '  ')}end
+        #{"#{board}#{link.join("\n")}\n".gsub(/^/, '  ')}end
       RUBY
     end
   end

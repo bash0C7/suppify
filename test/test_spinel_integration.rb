@@ -27,9 +27,9 @@ class TestSpinelIntegration < Test::Unit::TestCase
 
   def test_carries_a_kernel_s_ffi_build_settings
     lib = @spinel.compile(File.expand_path("fixtures/ffi.rb", __dir__), %w[Ffi.mag], name: "ffi")
-    assert_include lib.libs, "m"
-    assert_include lib.cflags, "-DHW_BOARD=1"
-    assert_include lib.kernel_c, "labs"
+    assert_include lib.libs, "hw"
+    assert_include lib.cflags, "-DHW_BOARD=3"
+    assert_include lib.cflags, "-I#{File.expand_path('fixtures/hw', __dir__)}"
   end
 
   def test_an_entry_the_kernel_does_not_define_fails
