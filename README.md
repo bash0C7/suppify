@@ -37,9 +37,9 @@ time you have measured and found too slow. Host timings for three kernels on the
 ## Requirements
 
 - Ruby 3.2 or later.
-- spinel, built (`make deps && make`). suppify finds it through `SPINEL` or `PATH`.
-  `spinel.pin` names the commit suppify is verified against.
-- For `--newlib`: a spinel that provides `lib/newlib`.
+- spinel from [bash0C7/spinel](https://github.com/bash0C7/spinel) at the commit in `spinel.pin`, built
+  (`make deps && make`). suppify finds it through `SPINEL` or `PATH`. The fork is matz/spinel
+  plus `lib/newlib`.
 
 ## Usage
 
@@ -185,11 +185,11 @@ The integration tests run when their tools are present:
 |---|---|
 | `test_spinel_integration.rb` | spinel (`SPINEL` or `PATH`) |
 | `test_call_integration.rb` | spinel, `cc` |
-| `test_newlib_integration.rb` | a spinel with `lib/newlib`, `arm-none-eabi-gcc`, `qemu-arm` |
+| `test_newlib_integration.rb` | spinel, `arm-none-eabi-gcc`, `qemu-arm` |
 | `test_picoruby_integration.rb` | spinel, a PicoRuby checkout in `PICORUBY_ROOT` |
 
 `rakelib/spinel.rake` tracks `spinel.pin`:
 
 - `rake spinel:latest` prints matz/spinel's master.
-- `rake spinel:check_pin[ref]` runs the suite against `ref`.
+- `rake spinel:check_pin[ref]` clones bash0C7/spinel at `ref` and runs the suite against it.
 - `rake spinel:bump_pin[ref]` writes `ref` to `spinel.pin` after the suite passes.

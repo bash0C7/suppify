@@ -6,12 +6,8 @@ class TestNewlibIntegration < Test::Unit::TestCase
   def test_the_gem_runs_on_a_32_bit_newlib_board
     omit("spinel, arm-none-eabi-gcc and qemu-arm are required") if [Fixtures.spinel, Fixtures.which("arm-none-eabi-gcc"), Fixtures.which("qemu-arm")].any?(&:empty?)
     Dir.mktmpdir do |dir|
-      gem = begin
-        capture_output { Fixtures.calc_gem(dir, "--newlib") }
-        File.join(dir, "picoruby-calc")
-      rescue Suppify::Error => e
-        omit(e.message)
-      end
+      gem = nil
+      capture_output { gem = Fixtures.calc_gem(dir, "--newlib") }
       newlib = File.join(gem, "src/newlib")
       flags = [*ARCH, "-O2", "-ffunction-sections", "-fdata-sections", "-Werror=implicit-function-declaration", "-D_DEFAULT_SOURCE",
                "-include", "#{newlib}/sp_newlib_config.h", "-I#{newlib}", "-I#{gem}/include", "-I#{gem}/src",

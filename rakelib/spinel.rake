@@ -3,14 +3,15 @@ require "fileutils"
 require "open3"
 
 SUPPIFY_ROOT = File.expand_path("..", __dir__)
+SPINEL_REPO = "https://github.com/bash0C7/spinel"
 
-# Clones and builds matz/spinel at +ref+, runs this repo's suite against it, and keeps the clone when it fails.
+# Clones and builds bash0C7/spinel at +ref+, runs this repo's suite against it, and keeps the clone when it fails.
 #: (String) -> bool
 def verify_spinel_ref(ref)
   dir = Dir.mktmpdir("spinel-check-")
   spinel_dir = File.join(dir, "spinel")
   steps = [
-    ["git", "clone", "https://github.com/matz/spinel", spinel_dir],
+    ["git", "clone", SPINEL_REPO, spinel_dir],
     ["git", "-C", spinel_dir, "checkout", ref],
     ["make", "-C", spinel_dir, "deps"],
     ["make", "-C", spinel_dir],
