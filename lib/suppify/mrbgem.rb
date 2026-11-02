@@ -71,6 +71,9 @@ module Suppify
       link << "build.linker.libraries.concat(libs - build.linker.libraries)"
       <<~RUBY
         MRuby::Gem::Specification.new(#{"picoruby-#{lib.name}".inspect}) do |spec|
+          SUPPIFY_GEMS = {} unless defined?(SUPPIFY_GEMS)
+          other = SUPPIFY_GEMS[build.name] ||= spec.name
+          raise "\#{other} and \#{spec.name} are both suppify gems in build \#{build.name}; compile every kernel into one gem" if other != spec.name
           spec.license = #{license.inspect}
           spec.author = "suppify"
           spec.summary = #{"#{lib.name}: Ruby compiled by spinel".inspect}

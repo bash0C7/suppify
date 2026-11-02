@@ -40,6 +40,7 @@ class TestMrbgem < Test::Unit::TestCase
     rake = File.read(File.join(Suppify::Mrbgem.write(@lib, @tmp, license: "Apache-2.0"), "mrbgem.rake"))
     assert_include rake, %(MRuby::Gem::Specification.new("picoruby-calc"))
     assert_include rake, %(spec.license = "Apache-2.0")
+    assert_include rake, %(other = SUPPIFY_GEMS[build.name] ||= spec.name)
     assert_include rake, %(spec.cc.defines.concat(["SP_ONE_STRING", "BOARD=1"]))
     assert_include rake, %(spec.cc.include_paths.concat(["/opt/sdk/include"]))
     assert_include rake, %(libs = ["m", "esp_timer"])

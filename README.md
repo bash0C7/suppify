@@ -123,8 +123,9 @@ conf.gem gemdir: "/path/to/build/picoruby-calc"
 On mruby, `Calc.add(2, 3)` works as soon as the VM starts. On mruby/c, call
 `require "calc"` first; this needs `picoruby-require`.
 
-Each gem carries its own copy of spinel's runtime, so a firmware links one suppify gem.
-Put all of a firmware's kernels into one kernel file.
+A build links one suppify gem: spinel's runtime serves one compiled program, and each kernel
+is its own program. Put all of a build's kernels into one kernel file (a top file can
+`require_relative` the others). A second suppify gem stops the build with both gem names.
 
 ### Errors
 

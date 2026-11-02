@@ -51,6 +51,28 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
     end
   end
 
+  def test_a_second_suppify_gem_stops_the_build_by_name
+    omit("spinel and PICORUBY_ROOT are required") if Fixtures.spinel.empty? || !File.exist?(File.join(ROOT, "Rakefile"))
+    Dir.mktmpdir do |dir|
+      capture_output do
+        Fixtures.calc_gem(dir)
+        Suppify::CLI.run([FFI, "Ffi.mag", "-d", dir], spinel: Suppify::Spinel.new(bin: Fixtures.spinel))
+      end
+      File.write("#{dir}/build.rb", <<~RB)
+        MRuby::Build.new do |conf|
+          conf.toolchain
+          conf.cc.defines << "PICORB_PLATFORM_POSIX"
+        #{VMS[:mruby][1].gsub(/^/, '  ')}  conf.gem gemdir: "#{dir}/picoruby-calc"
+          conf.gem gemdir: "#{dir}/picoruby-ffi"
+        end
+      RB
+      out, status = Open3.capture2e({ "MRUBY_CONFIG" => "#{dir}/build.rb", "MRUBY_BUILD_DIR" => "#{dir}/build" },
+                                    RbConfig.ruby, Gem.bin_path("rake", "rake"), chdir: ROOT)
+      assert_false status.success?
+      assert_include out, "picoruby-calc and picoruby-ffi are both suppify gems in build host"
+    end
+  end
+
   # Builds PicoRuby for +vm+ with the gem the block writes into a temporary directory,
   # then runs +program+ on it (after `require "<name>"` on mruby/c).
   #: (Symbol, String, String, String, String, ?expected: String) { (String) -> String } -> void
