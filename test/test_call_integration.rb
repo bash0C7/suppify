@@ -15,6 +15,9 @@ class TestCallIntegration < Test::Unit::TestCase
     half 9: cb 3f f8 00 00 00 00 00 00
     check raised -3 ArgumentError: negative
     blen 1: 04
+    half32 9: cb 3f f8 00 00 00 00 00 00
+    ignore 1: c0
+    greet16 46: d9 2c hi, 
     big %s
     malformed -1
     cleared [] []

@@ -15,6 +15,10 @@ int main(void) {
   const uint8_t big[] = { 0x92, 0xd3, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01 };
   const uint8_t bad[] = { 0x92, 0x02 };
   const uint8_t blen[] = { 0x91, 0xc4, 0x04, 'a', 0, 'b', 'c' };
+  const uint8_t half32[] = { 0x91, 0xca, 0x40, 0x40, 0x00, 0x00 };
+  const uint8_t one[] = { 0x91, 0x01 };
+  uint8_t greet16[4 + 40] = { 0x91, 0xda, 0x00, 40 };
+  memset(greet16 + 4, 'a', 40);
   for (const suppify_kernel_t *k = calc_kernels; k->name; k++) printf("kernel %s %s\n", k->name, k->signature());
   calc_kernels[0].init();
   dump("add", calc_Calc_add_call(add, sizeof add, out, sizeof out), out);
@@ -23,6 +27,10 @@ int main(void) {
   int32_t r = calc_Calc_check_call(neg, sizeof neg, out, sizeof out);
   printf("check raised %d %s: %s\n", r, calc_error_class(), calc_error_message());
   dump("blen", calc_Calc_blen_call(blen, sizeof blen, out, sizeof out), out);
+  dump("half32", calc_Calc_half_call(half32, sizeof half32, out, sizeof out), out);
+  dump("ignore", calc_Calc_ignore_call(one, sizeof one, out, sizeof out), out);
+  int32_t g = calc_Calc_greet_call(greet16, sizeof greet16, out, sizeof out);
+  printf("greet16 %d: %02x %02x %.4s\n", g, out[0], out[1], (const char *)out + 2);
   printf("big %d\n", calc_Calc_add_call(big, sizeof big, out, sizeof out));
   printf("malformed %d\n", calc_Calc_add_call(bad, sizeof bad, out, sizeof out));
   printf("cleared [%s] [%s]\n", calc_error_class(), calc_error_message());
