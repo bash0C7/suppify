@@ -25,11 +25,13 @@ class TestSpinelIntegration < Test::Unit::TestCase
     assert_include lib.defines, "SP_ONE_STRING"
   end
 
-  def test_carries_a_kernel_s_ffi_build_settings
-    lib = @spinel.compile(File.expand_path("fixtures/ffi.rb", __dir__), %w[Ffi.mag], name: "ffi")
+  def test_carries_a_kernel_s_c_dependencies
+    lib = @spinel.compile(File.expand_path("fixtures/native.rb", __dir__), %w[Native.mag Native.b64], name: "native")
     assert_include lib.libs, "hw"
     assert_include lib.cflags, "-DHW_BOARD=3"
     assert_include lib.cflags, "-I#{File.expand_path('fixtures/hw', __dir__)}"
+    assert_include lib.cflags, "-ffp-contract=off"
+    assert_equal ["sp_base64.c"], lib.sources.map { File.basename(_1) }
   end
 
   def test_an_entry_the_kernel_does_not_define_fails

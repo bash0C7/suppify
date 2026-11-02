@@ -22,6 +22,7 @@ module Suppify
       args = argv.dup
       while (arg = args.shift)
         next opts[:newlib] = true if arg == "--newlib"
+        raise Error, "unknown option #{arg}\n#{USAGE}" if arg.start_with?("-") && !flags.key?(arg)
         next words << arg unless flags.key?(arg)
         opts[flags[arg]] = args.shift or raise Error, "#{arg} needs a value\n#{USAGE}"
       end
@@ -29,6 +30,8 @@ module Suppify
       raise Error, USAGE if kernel.nil? || entries.empty?
       bad = entries.grep_v(/\A[A-Z]\w*\.\w+[?!]?\z/)
       raise Error, "entries must be Module.method: #{bad.join(', ')}" unless bad.empty?
+      twice = entries.tally.select { |_, n| n > 1 }.keys
+      raise Error, "entries listed more than once: #{twice.join(', ')}" unless twice.empty?
       opts[:name] ||= File.basename(kernel, ".rb")
       raise Error, "-o must be a C identifier: #{opts[:name]}" unless opts[:name].match?(/\A[A-Za-z_]\w*\z/)
       opts.merge(kernel:, entries:)

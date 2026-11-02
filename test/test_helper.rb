@@ -12,9 +12,9 @@ module Fixtures
 
   def entry(name, ret, *params, mod: "Calc", cname: "sp_#{mod}_s_#{name}") = Suppify::Entry.new(mod:, name:, cname:, ret:, params:)
 
-  def library(entries, runtime_dir: "/rt", cflags: [], libs: ["m", "crypt"]) =
+  def library(entries, runtime_dir: "/rt", cflags: [], libs: ["m", "crypt"], ldflags: [], sources: []) =
     Suppify::Library.new(name: "calc", kernel_c: "/* kernel */\n", kernel_h: "/* header */\n", entries:,
-                         runtime_dir:, defines: ["SP_ONE_STRING"], cflags:, libs:)
+                         runtime_dir:, defines: ["SP_ONE_STRING"], cflags:, libs:, ldflags:, sources:)
 
   def which(cmd) = ENV["PATH"].split(File::PATH_SEPARATOR).map { File.join(_1, cmd) }.find { File.executable?(_1) }.to_s
 

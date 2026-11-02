@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-#include "calc.h"
+#include "suppify/calc.h"
 static void dump(const char *label, int32_t n, const uint8_t *out) {
   printf("%s %d:", label, n);
   for (int i = 0; i < n; i++) printf(" %02x", out[i]);
@@ -25,6 +25,8 @@ int main(void) {
   dump("blen", calc_Calc_blen_call(blen, sizeof blen, out, sizeof out), out);
   printf("big %d\n", calc_Calc_add_call(big, sizeof big, out, sizeof out));
   printf("malformed %d\n", calc_Calc_add_call(bad, sizeof bad, out, sizeof out));
+  printf("cleared [%s] [%s]\n", calc_error_class(), calc_error_message());
+  printf("negative %d %d\n", calc_Calc_add_call(add, -1, out, sizeof out), calc_Calc_add_call(add, sizeof add, out, -1));
   printf("nospace %d\n", calc_Calc_greet_call(greet, sizeof greet, out, 3));
   intptr_t sum; const char *s; size_t n;
   int ra = calc_Calc_add(40, 2, &sum); printf("typed add %d %ld\n", ra, (long)sum);

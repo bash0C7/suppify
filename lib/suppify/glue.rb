@@ -97,7 +97,7 @@ module Suppify
       <<~C
         #include <string.h>
         #include "#{n}_spinel.h"
-        #include "#{n}.h"
+        #include "suppify/#{n}.h"
 
         static char sx_cls[64];
         static char sx_msg[256];
@@ -277,6 +277,8 @@ module Suppify
         #{give}  return 0;
         }
         int32_t #{f}_call(const uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
+          sx_cls[0] = sx_msg[0] = 0;
+          if (in_len < 0 || out_cap < 0) return SUPPIFY_MALFORMED;
           sx_in r = { in, in + in_len };
           sx_out w = { out, out + out_cap, false };
           #{f}_ctx c;

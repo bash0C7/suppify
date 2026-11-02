@@ -1,3 +1,5 @@
+require "base64"
+
 module Hw
   ffi_lib "hw"
   ffi_cflags "-I" + File.expand_path("hw", __dir__)
@@ -9,7 +11,10 @@ module Hw
   ffi_func :hw_board_scale, [:long], :long
 end
 
-module Ffi
+module Native
   #: (Integer) -> Integer
   def self.mag(n) = Hw.hw_board_scale(n)
+
+  #: (String) -> String
+  def self.b64(s) = Base64.strict_encode64(s)
 end

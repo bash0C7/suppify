@@ -10,12 +10,15 @@ class TestMrbgem < Test::Unit::TestCase
       "regexp/re_compile.c" => "#include <mruby.h>\n#include <mruby/string.h>\n#include <string.h>\n",
       "regexp/shim/mruby.h" => "shim", "regexp/shim/mruby/string.h" => %(#include "../mruby.h"\n),
       "newlib/sp_newlib.c" => "stubs", "newlib/sys/mman.h" => "mman",
+      "spinel/runtime.h" => %(#include "sp_gc.h"\n#include <stdint.h>\n),
+      "../packages/base64/sp_base64.c" => %(#include "spinel/runtime.h"\n),
     }.each do |f, body|
       FileUtils.mkdir_p(File.dirname(File.join(@rt, f)))
       File.write(File.join(@rt, f), body)
     end
     @lib = Fixtures.library([Fixtures.entry("add", "sp_int", "sp_int", "sp_int")], runtime_dir: @rt,
-                            cflags: ["-I/opt/sdk/include", "-DBOARD=1"], libs: ["m", "esp_timer"])
+                            cflags: ["-I/opt/sdk/include", "-DBOARD=1", "-ffp-contract=off"], libs: ["m", "esp_timer"],
+                            ldflags: ["-L/opt/sdk/lib"], sources: [File.join(@tmp, "packages/base64/sp_base64.c")])
   end
 
   def teardown = FileUtils.remove_entry(@tmp)
@@ -25,8 +28,8 @@ class TestMrbgem < Test::Unit::TestCase
   def test_writes_a_self_contained_gem
     dir = Suppify::Mrbgem.write(@lib, @tmp)
     assert_equal File.join(@tmp, "picoruby-calc"), dir
-    assert_equal %w[include/calc.h mrbgem.rake mrblib/calc.rb src/binding.c src/calc_glue.c src/calc_spinel.c src/calc_spinel.h
-                    src/mruby.h src/mruby/string.h src/re_compile.c src/sp_gc.c src/spinel_rt.h], files(dir)
+    assert_equal %w[include/suppify/calc.h mrbgem.rake mrblib/calc.rb src/binding.c src/calc_glue.c src/calc_spinel.c src/calc_spinel.h
+                    src/mruby.h src/mruby/string.h src/re_compile.c src/sp_base64.c src/sp_gc.c src/spinel/runtime.h src/spinel_rt.h], files(dir)
     assert_equal "module Calc\nend\n", File.read(File.join(dir, "mrblib/calc.rb"))
   end
 
@@ -36,6 +39,12 @@ class TestMrbgem < Test::Unit::TestCase
     assert_equal %(#include "../mruby.h"\n), File.read(File.join(dir, "src/mruby/string.h"))
   end
 
+  def test_spin_packages_read_spinel_runtime_h_beside_the_flat_runtime
+    dir = Suppify::Mrbgem.write(@lib, @tmp)
+    assert_equal %(#include "spinel/runtime.h"\n), File.read(File.join(dir, "src/sp_base64.c"))
+    assert_equal %(#include "../sp_gc.h"\n#include <stdint.h>\n), File.read(File.join(dir, "src/spinel/runtime.h"))
+  end
+
   def test_rake_carries_spinel_build_settings
     rake = File.read(File.join(Suppify::Mrbgem.write(@lib, @tmp, license: "Apache-2.0"), "mrbgem.rake"))
     assert_include rake, %(MRuby::Gem::Specification.new("picoruby-calc"))
@@ -43,6 +52,8 @@ class TestMrbgem < Test::Unit::TestCase
     assert_include rake, %(other = SUPPIFY_GEMS[build.name] ||= spec.name)
     assert_include rake, %(spec.cc.defines.concat(["SP_ONE_STRING", "BOARD=1"]))
     assert_include rake, %(spec.cc.include_paths.concat(["/opt/sdk/include"]))
+    assert_include rake, %(spec.cc.flags.concat(["-ffp-contract=off"]))
+    assert_include rake, %(build.linker.flags.concat(["-L/opt/sdk/lib"] - build.linker.flags))
     assert_include rake, %(libs = ["m", "esp_timer"])
     assert_include rake, %(libs << "crypt")
     assert_include rake, %(build.linker.libraries.concat(libs - build.linker.libraries))

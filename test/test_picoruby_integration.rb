@@ -2,7 +2,7 @@ require "test_helper"
 
 class TestPicoRubyIntegration < Test::Unit::TestCase
   ROOT = ENV.fetch("PICORUBY_ROOT", "")
-  FFI = File.expand_path("fixtures/ffi.rb", __dir__)
+  NATIVE = File.expand_path("fixtures/native.rb", __dir__)
   HW = File.expand_path("fixtures/hw", __dir__)
 
   CALC_PROGRAM = <<~RUBY
@@ -11,10 +11,11 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
     print Calc.ignore(1).inspect, " "
     begin; Calc.check(-1); rescue ArgumentError => e; print "ArgumentError:", e.message, " "; end
     begin; Calc.add("2", 3); rescue TypeError; print "TypeError "; end
+    begin; Calc.add(2.7, 1); rescue TypeError; print "TypeError "; end
     puts Calc.check(7)
   RUBY
 
-  CALC_EXPECTED = "5 2.5 1.5 hi, world true false 3 4 nil ArgumentError:negative TypeError 7\n"
+  CALC_EXPECTED = "5 2.5 1.5 hi, world true false 3 4 nil ArgumentError:negative TypeError TypeError 7\n"
 
   VMS = {
     mruby: ["picoruby", <<~RB],
@@ -41,12 +42,12 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
       run_gem(vm, bin, config, "calc", CALC_PROGRAM) { |dir| Fixtures.calc_gem(dir) }
     end
 
-    define_method("test_a_kernel_s_ffi_settings_reach_the_#{vm}_build") do
-      run_gem(vm, bin, config, "ffi", %(print Ffi.mag(4), " ", Ffi.mag(-2), "\\n"), expected: "43 -17\n") do |dir|
+    define_method("test_a_kernel_s_c_dependencies_reach_the_#{vm}_build") do
+      run_gem(vm, bin, config, "native", %(print Native.mag(4), " ", Native.mag(-2), " ", Native.b64("hi"), "\n"), expected: "43 -17 aGk=\n") do |dir|
         system("cc", "-DHW_BOARD=3", "-I#{HW}", "-c", "#{HW}/hw.c", "-o", "#{dir}/hw.o", exception: true)
         system("ar", "rcs", "#{dir}/libhw.a", "#{dir}/hw.o", exception: true)
-        Suppify::CLI.run([FFI, "Ffi.mag", "-d", dir], spinel: Suppify::Spinel.new(bin: Fixtures.spinel))
-        File.join(dir, "picoruby-ffi")
+        Suppify::CLI.run([NATIVE, "Native.mag", "Native.b64", "-d", dir], spinel: Suppify::Spinel.new(bin: Fixtures.spinel))
+        File.join(dir, "picoruby-native")
       end
     end
   end
@@ -56,20 +57,20 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
     Dir.mktmpdir do |dir|
       capture_output do
         Fixtures.calc_gem(dir)
-        Suppify::CLI.run([FFI, "Ffi.mag", "-d", dir], spinel: Suppify::Spinel.new(bin: Fixtures.spinel))
+        Suppify::CLI.run([NATIVE, "Native.mag", "Native.b64", "-d", dir], spinel: Suppify::Spinel.new(bin: Fixtures.spinel))
       end
       File.write("#{dir}/build.rb", <<~RB)
         MRuby::Build.new do |conf|
           conf.toolchain
           conf.cc.defines << "PICORB_PLATFORM_POSIX"
         #{VMS[:mruby][1].gsub(/^/, '  ')}  conf.gem gemdir: "#{dir}/picoruby-calc"
-          conf.gem gemdir: "#{dir}/picoruby-ffi"
+          conf.gem gemdir: "#{dir}/picoruby-native"
         end
       RB
       out, status = Open3.capture2e({ "MRUBY_CONFIG" => "#{dir}/build.rb", "MRUBY_BUILD_DIR" => "#{dir}/build" },
                                     RbConfig.ruby, Gem.bin_path("rake", "rake"), chdir: ROOT)
       assert_false status.success?
-      assert_include out, "picoruby-calc and picoruby-ffi are both suppify gems in build host"
+      assert_include out, "picoruby-calc and picoruby-native are both suppify gems in build host"
     end
   end
 

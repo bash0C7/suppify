@@ -23,6 +23,11 @@ class TestCLI < Test::Unit::TestCase
     assert_equal "entries must be Module.method: add, Calc#add", error.message
   end
 
+  def test_rejects_an_entry_listed_twice_and_an_unknown_option
+    assert_equal "entries listed more than once: Calc.add", assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "Calc.add") }.message
+    assert_match(/\Aunknown option --newlb\n/, assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "--newlb") }.message)
+  end
+
   def test_rejects_a_name_that_is_not_a_c_identifier
     assert_raise(Suppify::Error) { parse("my-calc.rb", "Calc.add") }
   end

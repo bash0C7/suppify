@@ -17,6 +17,8 @@ class TestCallIntegration < Test::Unit::TestCase
     blen 1: 04
     big %s
     malformed -1
+    cleared [] []
+    negative -1 -1
     nospace -2
     typed add 0 42
     typed greet 0 hi, x

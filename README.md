@@ -77,12 +77,15 @@ Entries cross the contract in these types:
 | `String` | `const char *s, size_t n` | `sp_String *` |
 | `void` / `nil` (return) | none | `void` |
 
-The kernel calls C through spinel's FFI (`ffi_func`, see spinel's `docs/FFI.md`). suppify
-carries its build settings into the gem:
+The kernel calls C through spinel's FFI (`ffi_func`, see spinel's `docs/FFI.md`) and uses spin
+packages through `require` (`base64`, `json`, `strscan`, ...). suppify carries what spinel's build
+needs into the gem:
 
-- **`ffi_cflags` `-I` / `-D`**: added to the gem's compile.
-- **`ffi_lib`**: added to the build's linker libraries. Every binary the PicoRuby build links
-  gets them, and they appear in `libmruby.flags.mak`.
+- **Compile flags** (`ffi_cflags` and spinel's own): `-I` and `-D` go to the gem's include paths
+  and defines, and the rest to its flags.
+- **Libraries** (`ffi_lib` and spinel's own): added to the build's linker libraries. Every binary
+  the PicoRuby build links gets them, and they appear in `libmruby.flags.mak`.
+- **Packages**: each package's C source is copied into `src/` and built for the target.
 
 ```ruby
 module Hw
@@ -92,7 +95,7 @@ module Hw
   ffi_func :hw_scale, [:long], :long
 end
 
-module Ffi
+module Native
   #: (Integer) -> Integer
   def self.mag(n) = Hw.hw_scale(n)
 end
@@ -106,12 +109,12 @@ A firmware that links `libmruby.a` with its own build system links the library t
 ```
 picoruby-calc/
   mrbgem.rake
-  include/calc.h        the C contract
-  mrblib/calc.rb        the kernel's modules
-  src/binding.c         mruby and mruby/c methods
-  src/calc_glue.c       typed and MessagePack entries
-  src/calc_spinel.c/.h  spinel's output
-  src/*.c, *.h          spinel's runtime
+  include/suppify/calc.h  the C contract
+  mrblib/calc.rb          the kernel's modules
+  src/binding.c           mruby and mruby/c methods
+  src/calc_glue.c         typed and MessagePack entries
+  src/calc_spinel.c/.h    spinel's output
+  src/*.c, *.h            spinel's runtime and the kernel's packages
 ```
 
 Add it to your build_config:
@@ -131,17 +134,18 @@ is its own program. Put all of a build's kernels into one kernel file (a top fil
 
 When the kernel raises, the VM raises the same class name if that class exists, and
 `RuntimeError` otherwise. The message is the kernel's. Arguments of the wrong type raise
-`TypeError`.
+`TypeError`: an `Integer` parameter takes an Integer only, and a `Float` parameter takes a Float
+or an Integer. An Integer that `intptr_t` or the VM's Integer cannot hold raises `RangeError`.
 
 ## The C contract
 
-`include/calc.h` uses plain C types only. It includes only `<stdbool.h>`, `<stddef.h>` and
+`include/suppify/calc.h` uses plain C types only. It includes only `<stdbool.h>`, `<stddef.h>` and
 `<stdint.h>`, so it works next to any VM's headers.
 
 ```c
 void calc_init(void);                       /* call once before any entry */
-const char *calc_error_class(void);         /* the last raised exception's class */
-const char *calc_error_message(void);       /* the last raised exception's message */
+const char *calc_error_class(void);         /* the class the last call raised, or "" */
+const char *calc_error_message(void);       /* the message the last call raised, or "" */
 
 int calc_Calc_add(intptr_t a0, intptr_t a1, intptr_t *ret);
 int calc_Calc_greet(const char *s0, size_t n0, const char **ret, size_t *ret_len);
@@ -157,7 +161,8 @@ extern const suppify_kernel_t calc_kernels[];
 - **MessagePack entries**: `in` is a MessagePack array of the arguments. The return value is written
   to `out` as one MessagePack value, and the entry returns its length. Integers wider than
   `intptr_t` return `SUPPIFY_RANGE`. A `Float` argument also accepts an integer, and a `bool`
-  argument treats `nil` as false. A negative return is a status:
+  argument treats `nil` as false. A negative return is a status, and a negative `in_len` or
+  `out_cap` is `SUPPIFY_MALFORMED`:
 
   | Status | Value |
   |---|---|
