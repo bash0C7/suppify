@@ -14,6 +14,13 @@ module Suppify
     "void" => Type.new(:void, "void", "nil", "void"),
   }.freeze
 
+  # One copy of the kernel and spinel's runtime, used by one caller: the prefix of its C entries and
+  # the name of its kernel table.
+  Instance = Data.define(:api, :table) do
+    #: () -> bool
+    def own_table? = table == "#{api}_kernels"
+  end
+
   # The C a Library's entries are reached through: the public header every caller includes, and the
   # translation unit that turns its plain C types into spinel's.
   module Glue
@@ -46,14 +53,22 @@ module Suppify
       "(#{args.map(&:ruby).join(', ')}) -> #{ret.ruby}"
     end
 
-    #: (Library) -> String
-    def header(lib)
-      n = lib.name
-      guard = "#{n.upcase}_H"
-      decls = lib.entries.map do |e|
-        "int #{n}_#{e.func}(#{params(e)});\n" \
-          "int32_t #{n}_#{e.func}_call(const uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap);\n" \
-          "const char *#{n}_#{e.func}_signature(void);\n"
+    # The public header: the entries of every instance. A table named by `--table` is left to the
+    # header of the code that looks it up (multicore.h declares `multicore_kernels`).
+    #: (Library, Array[Instance]) -> String
+    def header(lib, instances)
+      guard = "SUPPIFY_#{lib.name.upcase}_H"
+      decls = instances.map do |inst|
+        n = inst.api
+        "void #{n}_init(void);\n" \
+          "const char *#{n}_error_class(void);\n" \
+          "const char *#{n}_error_message(void);\n" +
+          lib.entries.map do |e|
+            "int #{n}_#{e.func}(#{params(e)});\n" \
+              "int32_t #{n}_#{e.func}_call(const uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap);\n" \
+              "const char *#{n}_#{e.func}_signature(void);\n"
+          end.join +
+          (inst.own_table? ? "extern const suppify_kernel_t #{inst.table}[];\n" : "")
       end
       <<~C
         #ifndef #{guard}
@@ -74,37 +89,33 @@ module Suppify
         } suppify_kernel_t;
         #endif
 
-        void #{n}_init(void);
-        const char *#{n}_error_class(void);
-        const char *#{n}_error_message(void);
-        #{decls.join}
-        extern const suppify_kernel_t #{n}_kernels[];
+        #{decls.join("\n")}
         #endif
       C
     end
 
-    #: (Library) -> String
-    def source(lib)
+    # The glue translation unit of one instance.
+    #: (Library, Instance) -> String
+    def source(lib, inst)
       names = lib.entries.map(&:name)
       dup = names.select { names.count(_1) > 1 }.uniq
       raise Error, "entries share a method name across modules: #{dup.join(', ')}" unless dup.empty?
-      [prelude(lib), *lib.entries.map { entry(lib.name, _1) }, table(lib)].join("\n")
+      [prelude(lib, inst.api), *lib.entries.map { entry(inst.api, _1) }, table(lib, inst)].join("\n")
     end
 
-    #: (Library) -> String
-    def prelude(lib)
-      n = lib.name
+    #: (Library, String) -> String
+    def prelude(lib, n)
       <<~C
         #include <string.h>
-        #include "#{n}_spinel.h"
-        #include "suppify/#{n}.h"
+        #include "#{lib.name}_spinel.h"
+        #include "suppify/#{lib.name}.h"
 
         static char sx_cls[64];
         static char sx_msg[256];
 
         void #{n}_init(void) {
           static bool ready;
-          if (!ready) { ready = true; #{n}_spinel(); }
+          if (!ready) { ready = true; #{lib.name}_spinel(); }
         }
         const char *#{n}_error_class(void) { return sx_cls; }
         const char *#{n}_error_message(void) { return sx_msg; }
@@ -112,7 +123,7 @@ module Suppify
         static inline int sx_try(void (*body)(void *), void *ctx) {
           const char *cls, *msg;
           sx_cls[0] = sx_msg[0] = 0;
-          if (!#{n}_spinel_try(body, ctx, &cls, &msg)) return 0;
+          if (!#{lib.name}_spinel_try(body, ctx, &cls, &msg)) return 0;
           strncpy(sx_cls, cls ? cls : "", sizeof sx_cls - 1);
           strncpy(sx_msg, msg ? msg : "", sizeof sx_msg - 1);
           return 1;
@@ -295,11 +306,19 @@ module Suppify
       C
     end
 
-    #: (Library) -> String
-    def table(lib)
-      n = lib.name
+    #: (Library, Instance) -> String
+    def table(lib, inst)
+      n = inst.api
       rows = lib.entries.map { |e| "  { \"#{e.name}\", #{n}_#{e.func}_call, #{n}_#{e.func}_signature, #{n}_init, #{n}_error_message },\n" }
-      "const suppify_kernel_t #{n}_kernels[] = {\n#{rows.join}  { 0, 0, 0, 0, 0 },\n};\n"
+      "const suppify_kernel_t #{inst.table}[] = {\n#{rows.join}  { 0, 0, 0, 0, 0 },\n};\n"
+    end
+
+    # The C symbols one instance exports; everything else in a sealed instance is local.
+    #: (Library, Instance) -> Array[String]
+    def exports(lib, inst)
+      n = inst.api
+      %W[#{n}_init #{n}_error_class #{n}_error_message #{inst.table}] +
+        lib.entries.flat_map { |e| %W[#{n}_#{e.func} #{n}_#{e.func}_call #{n}_#{e.func}_signature] }
     end
   end
 end

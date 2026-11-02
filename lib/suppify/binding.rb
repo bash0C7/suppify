@@ -19,6 +19,22 @@ module Suppify
       C
     end
 
+    # binding.c of a gem the VM does not call: the init functions each VM's build calls, empty.
+    #: (Library) -> String
+    def stubs(lib)
+      n = lib.name
+      <<~C
+        #if defined(PICORB_VM_MRUBYC)
+        #include <mrubyc.h>
+        void mrbc_#{n}_init(mrbc_vm *vm) { (void)vm; }
+        #else
+        #include <mruby.h>
+        void mrb_picoruby_#{n}_gem_init(mrb_state *mrb) { (void)mrb; }
+        void mrb_picoruby_#{n}_gem_final(mrb_state *mrb) { (void)mrb; }
+        #endif
+      C
+    end
+
     # The arguments of the plain C entry, from locals named after Glue.params.
     #: (Entry) -> String
     def call_args(e)

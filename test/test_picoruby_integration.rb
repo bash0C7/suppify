@@ -4,6 +4,7 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
   ROOT = ENV.fetch("PICORUBY_ROOT", "")
   NATIVE = File.expand_path("fixtures/native.rb", __dir__)
   HW = File.expand_path("fixtures/hw", __dir__)
+  INSTANCES_HOST = File.expand_path("fixtures/instances_host.c", __dir__)
 
   CALC_PROGRAM = <<~RUBY
     print Calc.add(2, 3), " ", Calc.half(5.0), " ", Calc.half(3), " ", Calc.greet("world"), " "
@@ -52,6 +53,21 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
     end
   end
 
+  def test_the_vm_and_a_worker_run_one_kernel_at_once
+    instances = lambda do |dir|
+      gem = "#{dir}/picoruby-calc"
+      libs = RbConfig::CONFIG["host_os"].include?("linux") ? %w[-lm -lcrypt] : %w[-lm]
+      out, status = Open3.capture2e("cc", "-O1", "-pthread", "-I#{gem}/include", INSTANCES_HOST, "#{dir}/build/host/lib/libmruby.a",
+                                    *libs, "-o", "#{dir}/instances")
+      assert status.success?, out
+      out, = Open3.capture2e("#{dir}/instances")
+      assert_equal "bad 0 0\n", out
+    end
+    run_gem(:mruby, *VMS[:mruby], "calc", %(print Calc.greet("vm"), "\\n"), expected: "hi, vm\n", check: instances) do |dir|
+      Fixtures.calc_gem(dir, "--table", "multicore_kernels")
+    end
+  end
+
   def test_a_second_suppify_gem_stops_the_build_by_name
     omit("spinel and PICORUBY_ROOT are required") if Fixtures.spinel.empty? || !File.exist?(File.join(ROOT, "Rakefile"))
     Dir.mktmpdir do |dir|
@@ -75,9 +91,9 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
   end
 
   # Builds PicoRuby for +vm+ with the gem the block writes into a temporary directory,
-  # then runs +program+ on it (after `require "<name>"` on mruby/c).
-  #: (Symbol, String, String, String, String, ?expected: String) { (String) -> String } -> void
-  def run_gem(vm, bin, config, name, program, expected: CALC_EXPECTED)
+  # then runs +program+ on it (after `require "<name>"` on mruby/c) and hands the directory to +check+.
+  #: (Symbol, String, String, String, String, ?expected: String, ?check: (^(String) -> void)?) { (String) -> String } -> void
+  def run_gem(vm, bin, config, name, program, expected: CALC_EXPECTED, check: nil)
     omit("spinel, cc and PICORUBY_ROOT are required") if Fixtures.spinel.empty? || Fixtures.which("cc").empty? || !File.exist?(File.join(ROOT, "Rakefile"))
     Dir.mktmpdir do |dir|
       gem = nil
@@ -96,6 +112,7 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
       File.write("#{dir}/prog.rb", (vm == :mrubyc ? %(require "#{name}"\n) : "") + program)
       out, = Open3.capture2e("#{dir}/build/host/bin/#{bin}", "#{dir}/prog.rb")
       assert_equal expected, out
+      check&.call(dir)
     end
   end
 end

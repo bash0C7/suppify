@@ -10,7 +10,7 @@ kernel の plain C 契約（型付き entry / MessagePack entry / kernel table�
 - `lib/suppify/spinel.rb` — spinel を呼び、`Entry` / `Library` を組み立てる
 - `lib/suppify/glue.rb` — C 契約: 公開 header（`include/suppify/<n>.h`）と glue TU
 - `lib/suppify/binding.rb` — mruby / mruby/c の module method（`binding.c`）
-- `lib/suppify/mrbgem.rb` — gem ディレクトリと `mrbgem.rake` の書き出し、runtime の同梱
+- `lib/suppify/mrbgem.rb` — gem ディレクトリと `mrbgem.rake` の書き出し、runtime の同梱、呼び手ごとのインスタンス
 - `lib/suppify/cli.rb` — コマンドライン
 
 テストも同じ区切り（`test/test_{glue,binding,mrbgem,cli}.rb` + `test/test_*_integration.rb`）。

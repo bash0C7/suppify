@@ -7,26 +7,43 @@ module Suppify
 
     RUNTIME = %w[*.c *.h regexp/*.c regexp/*.h regexp/*.inc regexp/shim/*.h].freeze
 
+    # The instances a gem holds: one for the VM when +vm+, then one per worker. Worker k's entries
+    # are `<name>_w<k>_*`; +table+ names worker 1's kernel table.
+    #: (String, vm: bool, workers: Integer, ?table: String?) -> Array[Instance]
+    def instances(name, vm:, workers:, table: nil)
+      list = vm ? [Instance.new(api: name, table: "#{name}_kernels")] : []
+      list + (1..workers).map { |k| Instance.new(api: "#{name}_w#{k}", table: (k == 1 && table) || "#{name}_w#{k}_kernels") }
+    end
+
     # Writes `picoruby-<name>/` under +out_dir+ and returns its path. +newlib+ adds spinel's
     # lib/newlib layer for a board whose C library is newlib (docs/newlib.md in spinel).
-    #: (Library, String, ?license: String, ?newlib: bool) -> String
-    def write(lib, out_dir, license: "MIT", newlib: false)
-      glue = Glue.source(lib)
-      binding_c = Binding.render(lib)
+    # The first instance builds from src/ as the gem's own code; every other one compiles the same
+    # runtime and kernel again and is sealed, so its symbols meet no other instance's.
+    #: (Library, String, ?license: String, ?newlib: bool, ?vm: bool, ?workers: Integer, ?table: String?) -> String
+    def write(lib, out_dir, license: "MIT", newlib: false, vm: true, workers: 0, table: nil)
+      primary, *sealed = instances(lib.name, vm:, workers:, table:)
+      raise Error, "a gem with no VM methods needs a worker" unless primary
       dir = File.join(out_dir, "picoruby-#{lib.name}")
       src = File.join(dir, "src")
       FileUtils.rm_rf(dir)
-      FileUtils.mkdir_p([File.join(src, "mruby"), File.join(src, "spinel"), File.join(dir, "include", "suppify"), File.join(dir, "mrblib")])
+      FileUtils.mkdir_p([File.join(src, "mruby"), File.join(src, "spinel"), File.join(src, "instances"), File.join(dir, "include", "suppify")])
       vendor_runtime(lib.runtime_dir, src)
       vendor_newlib(lib.runtime_dir, File.join(src, "newlib")) if newlib
       lib.sources.each { |f| FileUtils.cp(f, src) }
       File.write(File.join(src, "#{lib.name}_spinel.c"), lib.kernel_c)
       File.write(File.join(src, "#{lib.name}_spinel.h"), lib.kernel_h)
-      File.write(File.join(src, "#{lib.name}_glue.c"), glue)
-      File.write(File.join(src, "binding.c"), binding_c)
-      File.write(File.join(dir, "include", "suppify", "#{lib.name}.h"), Glue.header(lib))
-      File.write(File.join(dir, "mrblib", "#{lib.name}.rb"), lib.entries.map(&:mod).uniq.map { "module #{_1}\nend\n" }.join)
-      File.write(File.join(dir, "mrbgem.rake"), rake(lib, license, newlib))
+      File.write(File.join(src, "#{lib.name}_glue.c"), Glue.source(lib, primary))
+      sealed.each do |inst|
+        File.write(File.join(src, "instances", "#{inst.api}_glue.c"), Glue.source(lib, inst))
+        File.write(File.join(src, "instances", "#{inst.api}.exports"), Glue.exports(lib, inst).join("\n") + "\n")
+      end
+      File.write(File.join(src, "binding.c"), vm ? Binding.render(lib) : Binding.stubs(lib))
+      File.write(File.join(dir, "include", "suppify", "#{lib.name}.h"), Glue.header(lib, [primary, *sealed]))
+      if vm
+        FileUtils.mkdir_p(File.join(dir, "mrblib"))
+        File.write(File.join(dir, "mrblib", "#{lib.name}.rb"), lib.entries.map(&:mod).uniq.map { "module #{_1}\nend\n" }.join)
+      end
+      File.write(File.join(dir, "mrbgem.rake"), rake(lib, license, newlib, sealed))
       dir
     end
 
@@ -58,8 +75,40 @@ module Suppify
       FileUtils.cp_r(from, dest)
     end
 
-    #: (Library, String, bool) -> String
-    def rake(lib, license, newlib)
+    # The rake lines that build each sealed instance: the gem's runtime and kernel sources and the
+    # instance's glue, compiled into build_dir/instances/<api>/, linked into one relocatable
+    # object, with every symbol but the instance's exports made local.
+    #: (Library, Array[Instance]) -> String
+    def sealing(lib, sealed)
+      return "" if sealed.empty?
+      <<~RUBY
+        shared = Dir["\#{dir}/src/*.c"] - ["\#{dir}/src/binding.c", "\#{dir}/src/#{lib.name}_glue.c"]
+        seal = lambda do |out, objs, exports|
+          *wrapper, cc = build.cc.command.split
+          if `\#{cc} -dumpmachine`.include?("apple")
+            File.write("\#{out}.exports", File.readlines(exports, chomp: true).map { "_\#{_1}" }.join("\\n"))
+            sh(*wrapper, cc, "-r", "-nostdlib", "-Wl,-exported_symbols_list,\#{out}.exports", "-o", out, *objs)
+          else
+            sh(*wrapper, cc, "-r", "-nostdlib", "-o", "\#{out}.r", *objs)
+            sh(cc.sub(/(gcc|clang|cc)(-[\\d.]+)?\\z/, "objcopy"), "--keep-global-symbols=\#{exports}", "\#{out}.r", out)
+          end
+        end
+        #{sealed.map(&:api).inspect}.each do |api|
+          glue = "\#{dir}/src/instances/\#{api}_glue.c"
+          objs = [*shared, glue].map do |source|
+            obj = objfile("\#{build_dir}/instances/\#{api}/\#{File.basename(source, ".c")}")
+            file(obj => source) { |t| spec.cc.run t.name, source, [], source == glue ? ["\#{dir}/src"] : [] }
+            obj
+          end
+          sealed = objfile("\#{build_dir}/instances/\#{api}")
+          file(sealed => objs) { |t| seal.(t.name, objs, "\#{dir}/src/instances/\#{api}.exports") }
+          spec.objs << sealed
+        end
+      RUBY
+    end
+
+    #: (Library, String, bool, Array[Instance]) -> String
+    def rake(lib, license, newlib, sealed)
       includes = lib.cflags.grep(/\A-I/).map { _1.delete_prefix("-I") }
       defines = lib.defines + lib.cflags.grep(/\A-D/).map { _1.delete_prefix("-D") }
       flags = lib.cflags.grep_v(/\A-[ID]/)
@@ -87,7 +136,7 @@ module Suppify
           spec.cc.defines.concat(#{defines.inspect})
           spec.cc.include_paths.concat(#{includes.inspect})
           spec.cc.flags.concat(#{flags.inspect})
-        #{"#{board}#{link.join("\n")}\n".gsub(/^/, '  ')}end
+        #{"#{board}#{link.join("\n")}\n#{sealing(lib, sealed)}".gsub(/^/, '  ').gsub(/^  $/, '')}end
       RUBY
     end
   end

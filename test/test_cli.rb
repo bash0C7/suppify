@@ -4,8 +4,19 @@ class TestCLI < Test::Unit::TestCase
   def parse(*argv) = Suppify::CLI.parse(argv)
 
   def test_defaults
-    assert_equal({ kernel: "k/calc.rb", entries: ["Calc.add", "Calc.even?"], name: "calc", out_dir: ".", license: "MIT", newlib: false },
+    assert_equal({ kernel: "k/calc.rb", entries: ["Calc.add", "Calc.even?"], name: "calc", out_dir: ".", license: "MIT", newlib: false,
+                   vm: true, workers: 0, table: nil },
                  parse("k/calc.rb", "Calc.add", "Calc.even?"))
+  end
+
+  def test_callers_decide_the_instances
+    assert_equal [true, 1, "multicore_kernels"], parse("calc.rb", "Calc.add", "--table", "multicore_kernels").values_at(:vm, :workers, :table)
+    assert_equal [false, 1], parse("calc.rb", "Calc.add", "--no-vm").values_at(:vm, :workers)
+    assert_equal [true, 2], parse("calc.rb", "Calc.add", "--workers", "2").values_at(:vm, :workers)
+    assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "--no-vm", "--workers", "0") }
+    assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "--table", "t", "--workers", "0") }
+    assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "--workers", "two") }
+    assert_raise(Suppify::Error) { parse("calc.rb", "Calc.add", "--table", "multi-core") }
   end
 
   def test_flags

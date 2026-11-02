@@ -6,8 +6,11 @@ class TestGlue < Test::Unit::TestCase
                               Fixtures.entry("even?", "sp_bool", "sp_int", cname: "sp_Calc_s_even_p"),
                               Fixtures.entry("go", "void")])
 
+  def vm = Suppify::Instance.new(api: "calc", table: "calc_kernels")
+  def worker = Suppify::Instance.new(api: "calc_w1", table: "multicore_kernels")
+
   def test_the_header_states_the_contract_in_plain_c
-    h = Suppify::Glue.header(lib)
+    h = Suppify::Glue.header(lib, [vm])
     assert_include h, "#define SUPPIFY_MALFORMED (-1)"
     assert_include h, "} suppify_kernel_t;"
     assert_include h, "void calc_init(void);"
@@ -21,7 +24,7 @@ class TestGlue < Test::Unit::TestCase
   end
 
   def test_the_source_calls_each_entry_inside_the_try_frame
-    c = Suppify::Glue.source(lib)
+    c = Suppify::Glue.source(lib, vm)
     assert_include c, %(#include "calc_spinel.h")
     assert_include c, "if (!calc_spinel_try(body, ctx, &cls, &msg)) return 0;"
     assert_include c, "sp_String * a0 = SP_STR_HDL(sp_str_from_bytes(c->s0, c->n0)); SP_GC_ROOT(a0);"
@@ -31,14 +34,29 @@ class TestGlue < Test::Unit::TestCase
     assert_include c, %(return "(Integer) -> bool";)
   end
 
+  def test_a_worker_instance_has_its_own_entries_over_the_same_kernel
+    h = Suppify::Glue.header(lib, [vm, worker])
+    assert_include h, "int calc_Calc_add(intptr_t a0, intptr_t a1, intptr_t *ret);"
+    assert_include h, "int calc_w1_Calc_add(intptr_t a0, intptr_t a1, intptr_t *ret);"
+    assert_include h, "extern const suppify_kernel_t calc_kernels[];"
+    assert_not_include h, "multicore_kernels"
+    c = Suppify::Glue.source(lib, worker)
+    assert_include c, "if (!calc_spinel_try(body, ctx, &cls, &msg)) return 0;"
+    assert_include c, "int calc_w1_Calc_add(intptr_t a0, intptr_t a1, intptr_t *ret) {"
+    assert_include c, %(const suppify_kernel_t multicore_kernels[] = {\n  { "add", calc_w1_Calc_add_call, calc_w1_Calc_add_signature, calc_w1_init, calc_w1_error_message },)
+    one = Fixtures.library([Fixtures.entry("add", "sp_int", "sp_int", "sp_int")])
+    assert_equal %w[calc_w1_init calc_w1_error_class calc_w1_error_message multicore_kernels
+                    calc_w1_Calc_add calc_w1_Calc_add_call calc_w1_Calc_add_signature], Suppify::Glue.exports(one, worker)
+  end
+
   def test_a_type_outside_the_contract_names_the_entry
-    error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library([Fixtures.entry("sum", "sp_int", "sp_IntArray *")])) }
+    error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library([Fixtures.entry("sum", "sp_int", "sp_IntArray *")]), vm) }
     assert_equal "Calc.sum has sp_IntArray *, which crosses no contract suppify writes", error.message
   end
 
   def test_the_kernel_table_names_each_method_once
     twice = [Fixtures.entry("run", "void"), Fixtures.entry("run", "void", mod: "Other")]
-    error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library(twice)) }
+    error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library(twice), vm) }
     assert_equal "entries share a method name across modules: run", error.message
   end
 end

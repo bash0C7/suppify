@@ -52,6 +52,8 @@ ruby suppify.rb kernel.rb Calc.add Calc.greet -o calc -d build
 - **`-d DIR`**: the output directory. The default is `.`.
 - **`--license ID`**: `spec.license`. The default is `MIT`.
 - **`--newlib`**: build for a board whose C library is newlib (see [Boards with newlib](#boards-with-newlib)).
+- **`--workers K`**, **`--table NAME`**, **`--no-vm`**: the callers outside the VM (see
+  [Callers and instances](#callers-and-instances)).
 
 ### The kernel
 
@@ -115,6 +117,7 @@ picoruby-calc/
   src/calc_glue.c         typed and MessagePack entries
   src/calc_spinel.c/.h    spinel's output
   src/*.c, *.h            spinel's runtime and the kernel's packages
+  src/instances/          the glue and exported names of each sealed instance
 ```
 
 Add it to your build_config:
@@ -129,6 +132,41 @@ On mruby, `Calc.add(2, 3)` works as soon as the VM starts. On mruby/c, call
 A build links one suppify gem: spinel's runtime serves one compiled program, and each kernel
 is its own program. Put all of a build's kernels into one kernel file (a top file can
 `require_relative` the others). A second suppify gem stops the build with both gem names.
+
+### Callers and instances
+
+spinel's runtime holds its heap, GC and exception state once per copy, so one copy serves one
+caller at a time. A caller is a core, a thread or a preemptive task; the VM is one caller, since
+it runs its own tasks one at a time. The gem holds one instance (a copy of the kernel and the
+runtime) per caller, chosen when the gem is generated:
+
+| Option | Instances |
+|---|---|
+| none | one, for the VM |
+| `--workers K` | one for the VM, plus one per worker `k` = 1..K |
+| `--table NAME` | names worker 1's kernel table, and implies `--workers 1` when no count is given |
+| `--no-vm` | no VM methods and no VM instance; implies `--workers 1` when no count is given |
+
+Each instance runs on its own: callers of different instances run the kernel at the same time.
+Worker `k`'s entries are `<name>_w<k>_*` and its table is `<name>_w<k>_kernels` (or `NAME`).
+Each instance belongs to one caller; that caller runs its `init`.
+
+For a VM and one picoruby-multicore worker on the other core:
+
+```sh
+ruby suppify.rb kernel.rb Calc.add -o calc --table multicore_kernels
+```
+
+```ruby
+Calc.add(2, 3)                 # the VM instance
+Multicore.run(:add, 2, 3)      # the worker instance, on the other core
+```
+
+The first instance builds from `src/` like any gem source. Each further one compiles the same
+sources into its own objects, links them into one relocatable object, and keeps only its own
+entries global (`objcopy --keep-global-symbols` with GNU tools, `-exported_symbols_list` with
+Apple's linker). An instance adds the kernel and the runtime once more: about 200 KB of code and
+20 KB of static RAM on a Cortex-M.
 
 ### Errors
 
@@ -155,7 +193,9 @@ const char *calc_Calc_add_signature(void);  /* "(Integer, Integer) -> Integer" *
 extern const suppify_kernel_t calc_kernels[];
 ```
 
-- **Names**: the C name is `<name>_<Module>_<method>`. A trailing `?` becomes `_p`.
+- **Names**: the C name is `<name>_<Module>_<method>` for the VM instance and
+  `<name>_w<k>_<Module>_<method>` for worker `k`. A trailing `?` becomes `_p`. The header leaves
+  a table named by `--table` undeclared, for the header of the code that looks it up.
 - **Typed entries**: return `0` on success and `1` when the kernel raised. They write the result
   through `ret`. A returned string stays valid until the next call into the library.
 - **MessagePack entries**: `in` is a MessagePack array of the arguments. The return value is written

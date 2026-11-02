@@ -33,6 +33,27 @@ class TestMrbgem < Test::Unit::TestCase
     assert_equal "module Calc\nend\n", File.read(File.join(dir, "mrblib/calc.rb"))
   end
 
+  def test_each_worker_beyond_the_first_instance_is_sealed_from_the_same_sources
+    dir = Suppify::Mrbgem.write(@lib, @tmp, workers: 2, table: "multicore_kernels")
+    assert_equal %w[src/instances/calc_w1.exports src/instances/calc_w1_glue.c src/instances/calc_w2.exports src/instances/calc_w2_glue.c],
+                 files(dir).grep(/instances/)
+    assert_include File.read(File.join(dir, "src/instances/calc_w1.exports")), "multicore_kernels\n"
+    rake = File.read(File.join(dir, "mrbgem.rake"))
+    assert_include rake, %(shared = Dir["\#{dir}/src/*.c"] - ["\#{dir}/src/binding.c", "\#{dir}/src/calc_glue.c"])
+    assert_include rake, %(["calc_w1", "calc_w2"].each do |api|)
+    assert_include rake, %(sh(cc.sub(/(gcc|clang|cc)(-[\\d.]+)?\\z/, "objcopy"), "--keep-global-symbols=\#{exports}", "\#{out}.r", out))
+    assert_include rake, %(sh(*wrapper, cc, "-r", "-nostdlib", "-Wl,-exported_symbols_list,\#{out}.exports", "-o", out, *objs))
+  end
+
+  def test_a_gem_without_the_vm_builds_its_first_worker_from_src
+    dir = Suppify::Mrbgem.write(@lib, @tmp, vm: false, workers: 1)
+    assert_empty files(dir).grep(/mrblib|instances/)
+    assert_include File.read(File.join(dir, "src/calc_glue.c")), "int calc_w1_Calc_add(intptr_t a0, intptr_t a1, intptr_t *ret) {"
+    assert_include File.read(File.join(dir, "src/binding.c")), "void mrb_picoruby_calc_gem_init(mrb_state *mrb) { (void)mrb; }"
+    assert_not_include File.read(File.join(dir, "mrbgem.rake")), "seal"
+    assert_raise(Suppify::Error) { Suppify::Mrbgem.write(@lib, @tmp, vm: false, workers: 0) }
+  end
+
   def test_the_regexp_engine_reads_its_own_mruby_shim
     dir = Suppify::Mrbgem.write(@lib, @tmp)
     assert_equal %(#include "mruby.h"\n#include "mruby/string.h"\n#include <string.h>\n), File.read(File.join(dir, "src/re_compile.c"))
