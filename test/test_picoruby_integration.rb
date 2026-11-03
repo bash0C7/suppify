@@ -9,14 +9,16 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
   CALC_PROGRAM = <<~RUBY
     print Calc.add(2, 3), " ", Calc.half(5.0), " ", Calc.half(3), " ", Calc.greet("world"), " "
     print Calc.even?(4), " ", Calc.even?(3), " ", Calc.nully.bytesize, " ", Calc.blen("a\\0bc"), " "
-    print Calc.ignore(1).inspect, " "
+    print Calc.ignore(1).inspect, " ", Calc.slot(1), " ", Calc.count(0), " "
+    begin; Calc.count(5); rescue TypeError => e; print "TypeError:", e.message, " "; end
     begin; Calc.check(-1); rescue ArgumentError => e; print "ArgumentError:", e.message, " "; end
     begin; Calc.add("2", 3); rescue TypeError; print "TypeError "; end
     begin; Calc.add(2.7, 1); rescue TypeError; print "TypeError "; end
     puts Calc.check(7)
   RUBY
 
-  CALC_EXPECTED = "5 2.5 1.5 hi, world true false 3 4 nil ArgumentError:negative TypeError TypeError 7\n"
+  CALC_EXPECTED = "5 2.5 1.5 hi, world true false 3 4 nil 0.5 7 TypeError:no implicit conversion of nil into Integer " \
+                  "ArgumentError:negative TypeError TypeError 7\n"
 
   VMS = {
     mruby: ["picoruby", <<~RB],

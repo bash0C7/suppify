@@ -14,6 +14,11 @@ module Suppify
     "void" => Type.new(:void, "void", "nil", "void"),
   }.freeze
 
+  OPTIONAL_RETURNS = {
+    "sp_oint" => [Type.new(:int, "intptr_t", "Integer", "sp_oint"), "sp_oint_arg_of"],
+    "sp_ofloat" => [Type.new(:float, "double", "Float", "sp_ofloat"), "sp_ofloat_arg"],
+  }.freeze
+
   # One copy of the kernel and spinel's runtime, used by one caller: the prefix of its C entries and
   # the name of its kernel table.
   Instance = Data.define(:api, :table) do
@@ -35,7 +40,8 @@ module Suppify
 
     #: (Entry) -> [Array[Type], Type]
     def types(e)
-      [e.params.map { type("#{e.mod}.#{e.name}", _1) }, type("#{e.mod}.#{e.name}", e.ret)]
+      ret = OPTIONAL_RETURNS.dig(e.ret, 0) || type("#{e.mod}.#{e.name}", e.ret)
+      [e.params.map { type("#{e.mod}.#{e.name}", _1) }, ret]
     end
 
     # `intptr_t a0, const char *s1, size_t n1, intptr_t *ret` for the typed entry.
@@ -257,6 +263,7 @@ module Suppify
       end
       call_args = args.each_with_index.map { |t, i| t.kind == :str ? "a#{i}" : "c->a#{i}" }.join(", ")
       call = "#{e.cname}(#{call_args})"
+      call = "#{OPTIONAL_RETURNS[ret.spinel][1]}(#{call})" if OPTIONAL_RETURNS.key?(ret.spinel)
       store = case ret.kind
               when :void then "  #{call};\n"
               when :str then "  c->ret = #{call};\n  c->ret_len = c->ret ? sp_str_byte_len(c->ret) : 0;\n"

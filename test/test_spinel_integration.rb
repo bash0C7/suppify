@@ -18,6 +18,8 @@ class TestSpinelIntegration < Test::Unit::TestCase
       "Calc.nully" => ["Calc_nully", "const char *", []],
       "Calc.blen" => ["Calc_blen", "sp_int", ["sp_String *"]],
       "Calc.ignore" => ["Calc_ignore", "void", %w[sp_int]],
+      "Calc.slot" => ["Calc_slot", "sp_ofloat", %w[sp_int]],
+      "Calc.count" => ["Calc_count", "sp_oint", %w[sp_int]],
     }, signatures)
     assert_include lib.kernel_h, "void calc_spinel(void);"
     assert_not_include lib.kernel_c, "int main("
@@ -41,7 +43,7 @@ class TestSpinelIntegration < Test::Unit::TestCase
   def test_cli_writes_a_gem_with_every_entry_registered
     Dir.mktmpdir do |dir|
       out, = capture_output { Fixtures.calc_gem(dir) }
-      assert_equal "wrote #{dir}/picoruby-calc (8 entries)\n", out
+      assert_equal "wrote #{dir}/picoruby-calc (10 entries)\n", out
       binding_c = File.read(File.join(dir, "picoruby-calc/src/binding.c"))
       assert_include binding_c, %(mrb_define_class_method(mrb, m0, "even?", sx_Calc_even_p, MRB_ARGS_REQ(1));)
       assert_include binding_c, %(mrbc_define_method(vm, m0, "even?", sx_Calc_even_p);)

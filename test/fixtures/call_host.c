@@ -39,5 +39,12 @@ int main(void) {
   intptr_t sum; const char *s; size_t n;
   int ra = calc_Calc_add(40, 2, &sum); printf("typed add %d %ld\n", ra, (long)sum);
   int rg = calc_Calc_greet("x", 1, &s, &n); printf("typed greet %d %.*s\n", rg, (int)n, s);
+  const uint8_t past[] = { 0x91, 0x05 };
+  dump("slot", calc_Calc_slot_call(one, sizeof one, out, sizeof out), out);
+  r = calc_Calc_slot_call(past, sizeof past, out, sizeof out);
+  printf("slot nil %d %s: %s\n", r, calc_error_class(), calc_error_message());
+  intptr_t count = 0;
+  int rc = calc_Calc_count(0, &count); printf("typed count %d %ld\n", rc, (long)count);
+  rc = calc_Calc_count(5, &count); printf("typed count nil %d %s: %s\n", rc, calc_error_class(), calc_error_message());
   return 0;
 }

@@ -1,4 +1,7 @@
 module Calc
+  @slots = Array.new(2, 0.5)
+  @counts = Array.new(2, 7)
+
   #: (Integer, Integer) -> Integer
   def self.add(a, b) = a + b
 
@@ -28,4 +31,10 @@ module Calc
     n + 1
     nil
   end
+
+  #: (Integer) -> Float
+  def self.slot(i) = @slots[i]
+
+  #: (Integer) -> Integer
+  def self.count(i) = @counts[i]
 end

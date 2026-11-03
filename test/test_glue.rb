@@ -49,6 +49,19 @@ class TestGlue < Test::Unit::TestCase
                     calc_w1_Calc_add calc_w1_Calc_add_call calc_w1_Calc_add_signature], Suppify::Glue.exports(one, worker)
   end
 
+  def test_a_maybe_nil_return_crosses_as_its_rbs_class
+    one = Fixtures.library([Fixtures.entry("slot", "sp_ofloat", "sp_int"), Fixtures.entry("count", "sp_oint", "sp_int")])
+    h = Suppify::Glue.header(one, [vm])
+    assert_include h, "int calc_Calc_slot(intptr_t a0, double *ret);"
+    assert_include h, "int calc_Calc_count(intptr_t a0, intptr_t *ret);"
+    c = Suppify::Glue.source(one, vm)
+    assert_include c, "c->ret = sp_ofloat_arg(sp_Calc_s_slot(c->a0));"
+    assert_include c, "c->ret = sp_oint_arg_of(sp_Calc_s_count(c->a0));"
+    assert_include c, %(return "(Integer) -> Float";)
+    error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library([Fixtures.entry("put", "void", "sp_oint")]), vm) }
+    assert_equal "Calc.put has sp_oint, which crosses no contract suppify writes", error.message
+  end
+
   def test_a_type_outside_the_contract_names_the_entry
     error = assert_raise(Suppify::Error) { Suppify::Glue.source(Fixtures.library([Fixtures.entry("sum", "sp_int", "sp_IntArray *")]), vm) }
     assert_equal "Calc.sum has sp_IntArray *, which crosses no contract suppify writes", error.message

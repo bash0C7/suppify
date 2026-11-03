@@ -7,7 +7,7 @@ module Fixtures
   module_function
 
   CALC = File.expand_path("fixtures/calc.rb", __dir__)
-  CALC_ENTRIES = %w[Calc.add Calc.half Calc.greet Calc.even? Calc.check Calc.nully Calc.blen Calc.ignore].freeze
+  CALC_ENTRIES = %w[Calc.add Calc.half Calc.greet Calc.even? Calc.check Calc.nully Calc.blen Calc.ignore Calc.slot Calc.count].freeze
   CALL_HOST = File.expand_path("fixtures/call_host.c", __dir__)
 
   def entry(name, ret, *params, mod: "Calc", cname: "sp_#{mod}_s_#{name}") = Suppify::Entry.new(mod:, name:, cname:, ret:, params:)

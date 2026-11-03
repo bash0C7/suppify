@@ -79,6 +79,10 @@ Entries cross the contract in these types:
 | `String` | `const char *s, size_t n` | `sp_String *` |
 | `void` / `nil` (return) | none | `void` |
 
+An entry typed `-> Integer` or `-> Float` may return a value spinel can only prove maybe-nil, such
+as an Array element (`sp_oint` / `sp_ofloat`). It crosses as `intptr_t` / `double`, and a `nil`
+raises `TypeError`.
+
 The kernel calls C through spinel's FFI (`ffi_func`, see spinel's `docs/FFI.md`) and uses spin
 packages through `require` (`base64`, `json`, `strscan`, ...). suppify carries what spinel's build
 needs into the gem:

@@ -10,6 +10,8 @@ class TestCallIntegration < Test::Unit::TestCase
     kernel nully () -> String
     kernel blen (String) -> Integer
     kernel ignore (Integer) -> nil
+    kernel slot (Integer) -> Float
+    kernel count (Integer) -> Integer
     add 1: 05
     greet 10: a9 68 69 2c 20 77 6f 72 6c 64
     half 9: cb 3f f8 00 00 00 00 00 00
@@ -25,6 +27,10 @@ class TestCallIntegration < Test::Unit::TestCase
     nospace -2
     typed add 0 42
     typed greet 0 hi, x
+    slot 9: cb 3f e0 00 00 00 00 00 00
+    slot nil -3 TypeError: can't convert nil into Float
+    typed count 0 7
+    typed count nil 1 TypeError: no implicit conversion of nil into Integer
   OUT
 
   def test_the_entries_answer_messagepack_and_plain_c_callers
