@@ -173,6 +173,10 @@ only its own entries global (`objcopy --keep-global-symbols` with GNU tools,
 `-exported_symbols_list` with Apple's linker). An instance adds the kernel and the runtime once
 more: about 200 KB of code and 20 KB of static RAM on a Cortex-M.
 
+`examples/accumulator` is a kernel with state, a C program (`main.c`) that runs its VM instance and
+its worker instance side by side, and a PicoRuby program (`prog.rb`). `test_example_integration.rb`
+builds them for both VMs and for a newlib board on `qemu-arm`, and checks their output.
+
 ### Errors
 
 When the kernel raises, the VM raises the same class name if that class exists, and
@@ -246,6 +250,7 @@ The integration tests run when their tools are present:
 | `test_call_integration.rb` | spinel, `cc` |
 | `test_newlib_integration.rb` | spinel, `arm-none-eabi-gcc`, `qemu-arm` |
 | `test_picoruby_integration.rb` | spinel, `cc`, a PicoRuby checkout in `PICORUBY_ROOT` |
+| `test_example_integration.rb` | spinel, `cc`, `PICORUBY_ROOT`; the board run also `arm-none-eabi-gcc` with newlib and `qemu-arm` |
 
 `rakelib/spinel.rake` tracks `spinel.pin`:
 
