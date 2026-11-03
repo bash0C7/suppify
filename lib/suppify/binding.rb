@@ -1,7 +1,7 @@
 module Suppify
   # Renders binding.c: a Library's entries as module methods of the VM the PicoRuby build selects,
   # mruby/c under PICORB_VM_MRUBYC and mruby otherwise. It reaches the kernel through the plain C
-  # contract alone (Glue.header), so no spinel header meets the VM's.
+  # contract alone (Glue.header).
   module Binding
     module_function
 

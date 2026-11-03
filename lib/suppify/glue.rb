@@ -60,7 +60,7 @@ module Suppify
     end
 
     # The public header: the entries of every instance. A table named by `--table` is left to the
-    # header of the code that looks it up (multicore.h declares `multicore_kernels`).
+    # header of the code that looks it up.
     #: (Library, Array[Instance]) -> String
     def header(lib, instances)
       guard = "SUPPIFY_#{lib.name.upcase}_H"

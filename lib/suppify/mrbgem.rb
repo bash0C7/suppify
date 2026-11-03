@@ -18,7 +18,7 @@ module Suppify
     # Writes `picoruby-<name>/` under +out_dir+ and returns its path. +newlib+ adds spinel's
     # lib/newlib layer for a board whose C library is newlib (docs/newlib.md in spinel).
     # The first instance builds from src/ as the gem's own code; every other one compiles the same
-    # runtime and kernel again and is sealed, so its symbols meet no other instance's.
+    # runtime and kernel again and is sealed.
     #: (Library, String, ?license: String, ?newlib: bool, ?vm: bool, ?workers: Integer, ?table: String?) -> String
     def write(lib, out_dir, license: "MIT", newlib: false, vm: true, workers: 0, table: nil)
       primary, *sealed = instances(lib.name, vm:, workers:, table:)
@@ -47,10 +47,9 @@ module Suppify
       dir
     end
 
-    # Copies the runtime flat into +src+. The regexp engine names its mruby shim as <mruby.h>;
-    # the copies name it "mruby.h", so the shim beside them is read even where the real mruby's
-    # headers come first on the include path. spinel/runtime.h, the header spin packages include,
-    # goes to src/spinel/ and names the flat headers one level up.
+    # Copies the runtime flat into +src+ and the regexp engine's mruby shim into src/mruby/, with the
+    # regexp sources' `#include <mruby.h>` written as `#include "mruby.h"`. spinel/*.h goes to
+    # src/spinel/ and includes the flat headers one level up.
     #: (String, String) -> void
     def vendor_runtime(runtime_dir, src)
       files = RUNTIME.flat_map { |pattern| Dir[File.join(runtime_dir, pattern)] }
