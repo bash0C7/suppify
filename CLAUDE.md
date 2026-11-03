@@ -21,7 +21,17 @@ kernel の plain C 契約（型付き entry / MessagePack entry / kernel table�
 
 - **コミットメッセージは英語で書く**（本文・subject ともに）。
 - **実装は Ruby**（No Python）。
-- **コメントは rbs-inline の型（`#:`）と、クラス・メソッドの説明のみ**。理由・経緯は commit message に書く。
+- **コメントはrbs-inlineの型（`#:`）と、class・module・methodの説明だけを書く**。
+  - 説明は、それが何をするか、つまり受け取るもの、返すもの、書き出すものを現在形で書く。
+  - 理由、経緯、他repoのcodeへの言及は、commit messageの本文に書く。
+  - Ruby以外のfile（C source、設定file）と、file名だけの見出しには、コメントを書かない。
+
+  ```ruby
+  # Writes `picoruby-<name>/` under +out_dir+ and returns its path. +newlib+ adds spinel's
+  # lib/newlib layer for a board whose C library is newlib.
+  #: (Library, String, ?newlib: bool) -> String
+  def write(lib, out_dir, newlib: false)
+  ```
 - **spinel への依存は「外部ツール参照」に限る** — git submodule / vendoring / subtree は禁止。
   spinel バイナリは `SPINEL` / `PATH` で発見し、runtime の場所は `spinel --print-build` から得る。
   spinel ソースはテスト時の ephemeral な pinned clone でのみ用意する。
