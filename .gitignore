@@ -1,13 +1,3 @@
-# ephemeral spinel clones for tests/CI (never vendored)
-/tmp/
-/.spinel-cache/
-
-# build artifacts
 *.o
 *.a
-
-# generated example build output
-/examples/fib/*/build/
-
-# bundler local install
 /vendor/bundle/

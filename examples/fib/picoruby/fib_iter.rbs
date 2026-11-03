@@ -1,3 +1,0 @@
-class Object
-  def fib: (Integer) -> Integer
-end
