@@ -36,17 +36,6 @@ class TestSpinelIntegration < Test::Unit::TestCase
     assert_equal ["sp_base64.c"], lib.sources.map { File.basename(_1) }
   end
 
-  def test_a_nilable_integer_or_float_return_stops_by_name
-    Dir.mktmpdir do |dir|
-      File.write("#{dir}/k.rb", "module K\n  #: (bool) -> Integer?\n  def self.maybe(b) = b ? 1 : nil\n\n  def self.bare(b) = b ? 1.5 : nil\nend\n")
-      error = assert_raise(Suppify::Error) { @spinel.compile("#{dir}/k.rb", %w[K.maybe], name: "k") }
-      assert_equal "K.maybe returns Integer? (sp_oint); a typed entry carries no nil, so declare a non-nil Integer or Float", error.message
-      error = assert_raise(Suppify::Error) { @spinel.compile("#{dir}/k.rb", %w[K.bare], name: "k") }
-      assert_equal "K.bare returns a type with no inline #: signature (sp_ofloat); a typed entry carries no nil, " \
-                   "so declare a non-nil Integer or Float", error.message
-    end
-  end
-
   def test_an_entry_the_kernel_does_not_define_fails
     assert_raise(Suppify::Error) { @spinel.compile(Fixtures::CALC, %w[Calc.nope], name: "calc") }
   end

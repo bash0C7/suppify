@@ -29,11 +29,11 @@ module Suppify
         run(dir, kernel, "-c", "--no-line-map", "--ext-init", "#{name}_spinel",
             "--ext-entry", entries.join(","), "-o", c_path)
         run(dir, kernel, "--emit-symbol-map")
-        symbols = symbol_map(Dir[File.join(dir, "*.symbols.json")].first)
+        cnames = symbol_map(Dir[File.join(dir, "*.symbols.json")].first)
         header = File.read(c_path.sub(/\.c\z/, ".h"))
         build = build_report(run(dir, kernel, "--print-build"))
         Library.new(name:, kernel_c: File.read(c_path), kernel_h: header,
-                    entries: entries.map { |e| entry(e, symbols, header) }, **build)
+                    entries: entries.map { |e| entry(e, cnames, header) }, **build)
       end
     end
 
@@ -46,19 +46,10 @@ module Suppify
       out
     end
 
-    #: (String?) -> Hash[String, Hash[String, untyped]]
+    #: (String?) -> Hash[String, String]
     def symbol_map(path)
       raise Error, "spinel wrote no symbol map" unless path
-      JSON.parse(File.read(path)).fetch("symbols").to_h { |s| [s["ruby"], s] }
-    end
-
-    # The return type of the inline `#:` signature right above a method's def, or nil without one.
-    #: (Hash[String, untyped]) -> String?
-    def rbs_return(symbol)
-      lines = File.readlines(symbol["file"], chomp: true)[0, symbol["line"] - 1]
-      sig = lines.reverse.take_while { _1.match?(/\A\s*#[:|]/) }.reverse
-      return nil unless sig.first&.match?(/\A\s*#:/)
-      sig.map { _1.sub(/\A\s*#[:|]/, "") }.join(" ").split("->").last.strip
+      JSON.parse(File.read(path)).fetch("symbols").to_h { |s| [s["ruby"], s["c"]] }
     end
 
     #: (String) -> { runtime_dir: String, defines: Array[String], cflags: Array[String], libs: Array[String], ldflags: Array[String], sources: Array[String] }
@@ -84,21 +75,12 @@ module Suppify
     end
 
     #: (String, Hash[String, String], String) -> Entry
-    def entry(ruby_name, symbols, header)
+    def entry(ruby_name, cnames, header)
       mod, name = ruby_name.split(".", 2)
-      symbol = symbols.fetch(ruby_name) { raise Error, "spinel did not export #{ruby_name}" }
-      cname = symbol["c"]
+      cname = cnames.fetch(ruby_name) { raise Error, "spinel did not export #{ruby_name}" }
       m = header.match(/^(.+?)\s*\b#{cname}\((.*)\);$/) or raise Error, "#{cname} is missing from spinel's header"
       params = m[2] == "void" ? [] : m[2].split(",").map { |p| p.strip.sub(/\s*\b\w+\z/, "") }
-      ret = m[1].strip
-      if OPTIONAL_RETURNS.key?(ret)
-        rbs = rbs_return(symbol)
-        if rbs.nil? || rbs.end_with?("?") || rbs.match?(/\bnil\b/)
-          raise Error, "#{ruby_name} returns #{rbs || 'a type with no inline #: signature'} (#{ret}); " \
-                       "a typed entry carries no nil, so declare a non-nil Integer or Float"
-        end
-      end
-      Entry.new(mod:, name:, cname:, ret:, params:)
+      Entry.new(mod:, name:, cname:, ret: m[1].strip, params:)
     end
   end
 end
