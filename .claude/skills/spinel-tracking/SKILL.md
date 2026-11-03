@@ -42,8 +42,11 @@ rake spinel:bump_pin[<ref>]     # check_pin[<ref>], then write spinel.pin when i
 `check_pin` runs every test whose tools are present. Before bumping, also run the tests the
 host may skip:
 
-- `PICORUBY_ROOT=<picoruby checkout>` runs `test_picoruby_integration.rb` on both VMs.
-- `arm-none-eabi-gcc` and `qemu-arm` on `PATH` run `test_newlib_integration.rb`.
+- `PICORUBY_ROOT=<picoruby checkout>` runs `test_picoruby_integration.rb` and
+  `test_example_integration.rb` on both VMs.
+- `arm-none-eabi-gcc` with newlib and `qemu-arm` on `PATH` run `test_newlib_integration.rb` and the
+  board run of `test_example_integration.rb`. `qemu-arm` runs on a Linux host only; on macOS, run the
+  suite in a Linux container.
 
 ## Downstream
 

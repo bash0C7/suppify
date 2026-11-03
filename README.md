@@ -26,13 +26,7 @@ suppify uses spinel's library output (`--ext-init`, `--ext-entry`, `--emit-symbo
 
 Start with picoruby-aot. Its methods stay ordinary VM methods that take and return VM
 objects, and it needs no extra build step. Use suppify for a kernel whose picoruby-aot
-time you have measured and found too slow. Host timings for three kernels on the mruby VM:
-
-| Kernel | mruby bytecode | picoruby-aot | suppify (spinel native) |
-|---|---|---|---|
-| `ulaw` | 0.347 s | 0.133 s | 0.017 s |
-| `glyph` | 1.739 s | 0.879 s | 0.043 s |
-| `spin` | 0.997 s | 0.141 s | 0.037 s |
+time you have measured and found too slow.
 
 ## Requirements
 
@@ -170,8 +164,8 @@ Multicore.run(:add, 2, 3)      # the worker instance, on the other core
 The first instance builds from `src/` like any gem source. Each further one compiles the same
 sources into its own objects with `-fno-common`, links them into one relocatable object, and keeps
 only its own entries global (`objcopy --keep-global-symbols` with GNU tools,
-`-exported_symbols_list` with Apple's linker). An instance adds the kernel and the runtime once
-more: about 200 KB of code and 20 KB of static RAM on a Cortex-M.
+`-exported_symbols_list` with Apple's linker). Each instance adds another copy of the kernel and
+the runtime to the code and static RAM.
 
 `examples/accumulator` is a kernel with state, a C program (`main.c`) that runs its VM instance and
 its worker instance side by side, and a PicoRuby program (`prog.rb`). `test_example_integration.rb`
