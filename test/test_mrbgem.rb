@@ -41,6 +41,7 @@ class TestMrbgem < Test::Unit::TestCase
     rake = File.read(File.join(dir, "mrbgem.rake"))
     assert_include rake, %(shared = Dir["\#{dir}/src/*.c"] - ["\#{dir}/src/binding.c", "\#{dir}/src/calc_glue.c"])
     assert_include rake, %(["calc_w1", "calc_w2"].each do |api|)
+    assert_include rake, %(file(obj => [source, first]))
     assert_include rake, %(sh(cc.sub(/(gcc|clang|cc)(-[\\d.]+)?\\z/, "objcopy"), "--keep-global-symbols=\#{exports}", "\#{out}.r", out))
     assert_include rake, %(sh(*wrapper, cc, "-r", "-nostdlib", "-Wl,-exported_symbols_list,\#{out}.exports", "-o", out, *objs))
   end

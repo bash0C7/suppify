@@ -97,7 +97,8 @@ module Suppify
           glue = "\#{dir}/src/instances/\#{api}_glue.c"
           objs = [*shared, glue].map do |source|
             obj = objfile("\#{build_dir}/instances/\#{api}/\#{File.basename(source, ".c")}")
-            file(obj => source) { |t| spec.cc.run t.name, source, [], source == glue ? ["\#{dir}/src"] : [] }
+            first = objfile("\#{build_dir}/src/\#{source == glue ? "#{lib.name}_glue" : File.basename(source, ".c")}")
+            file(obj => [source, first]) { spec.cc.run obj, source, [], source == glue ? ["\#{dir}/src"] : [] }
             obj
           end
           sealed = objfile("\#{build_dir}/instances/\#{api}")
