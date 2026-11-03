@@ -56,6 +56,9 @@ class TestPicoRubyIntegration < Test::Unit::TestCase
   def test_the_vm_and_a_worker_run_one_kernel_at_once
     instances = lambda do |dir|
       gem = "#{dir}/picoruby-calc"
+      out, = Open3.capture2e("nm", "-g", "#{dir}/build/host/mrbgems/picoruby-calc/instances/calc_w1.o")
+      defined = out.lines.map(&:split).reject { _1[-2] == "U" }.map { _1[-1].delete_prefix(RUBY_PLATFORM.include?("darwin") ? "_" : "") }
+      assert_equal File.readlines("#{gem}/src/instances/calc_w1.exports", chomp: true).sort, defined.sort
       libs = RbConfig::CONFIG["host_os"].include?("linux") ? %w[-lm -lcrypt] : %w[-lm]
       out, status = Open3.capture2e("cc", "-O1", "-pthread", "-I#{gem}/include", INSTANCES_HOST, "#{dir}/build/host/lib/libmruby.a",
                                     *libs, "-o", "#{dir}/instances")

@@ -44,6 +44,7 @@ class TestMrbgem < Test::Unit::TestCase
     assert_include rake, %(file(obj => [source, first]))
     assert_include rake, %(sh(cc.sub(/(gcc|clang|cc)(-[\\d.]+)?\\z/, "objcopy"), "--keep-global-symbols=\#{exports}", "\#{out}.r", out))
     assert_include rake, %(sh(*wrapper, cc, "-r", "-nostdlib", "-Wl,-exported_symbols_list,\#{out}.exports", "-o", out, *objs))
+    assert_include rake, %(spec.cc.run obj, source, [], source == glue ? ["\#{dir}/src"] : [], ["-fno-common"])
   end
 
   def test_a_gem_without_the_vm_builds_its_first_worker_from_src

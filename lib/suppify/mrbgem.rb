@@ -76,8 +76,8 @@ module Suppify
     end
 
     # The rake lines that build each sealed instance: the gem's runtime and kernel sources and the
-    # instance's glue, compiled into build_dir/instances/<api>/, linked into one relocatable
-    # object, with every symbol but the instance's exports made local.
+    # instance's glue, compiled into build_dir/instances/<api>/ without common symbols, linked into
+    # one relocatable object, with every symbol but the instance's exports made local.
     #: (Library, Array[Instance]) -> String
     def sealing(lib, sealed)
       return "" if sealed.empty?
@@ -98,7 +98,7 @@ module Suppify
           objs = [*shared, glue].map do |source|
             obj = objfile("\#{build_dir}/instances/\#{api}/\#{File.basename(source, ".c")}")
             first = objfile("\#{build_dir}/src/\#{source == glue ? "#{lib.name}_glue" : File.basename(source, ".c")}")
-            file(obj => [source, first]) { spec.cc.run obj, source, [], source == glue ? ["\#{dir}/src"] : [] }
+            file(obj => [source, first]) { spec.cc.run obj, source, [], source == glue ? ["\#{dir}/src"] : [], ["-fno-common"] }
             obj
           end
           sealed = objfile("\#{build_dir}/instances/\#{api}")

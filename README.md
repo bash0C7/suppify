@@ -163,10 +163,10 @@ Multicore.run(:add, 2, 3)      # the worker instance, on the other core
 ```
 
 The first instance builds from `src/` like any gem source. Each further one compiles the same
-sources into its own objects, links them into one relocatable object, and keeps only its own
-entries global (`objcopy --keep-global-symbols` with GNU tools, `-exported_symbols_list` with
-Apple's linker). An instance adds the kernel and the runtime once more: about 200 KB of code and
-20 KB of static RAM on a Cortex-M.
+sources into its own objects with `-fno-common`, links them into one relocatable object, and keeps
+only its own entries global (`objcopy --keep-global-symbols` with GNU tools,
+`-exported_symbols_list` with Apple's linker). An instance adds the kernel and the runtime once
+more: about 200 KB of code and 20 KB of static RAM on a Cortex-M.
 
 ### Errors
 
