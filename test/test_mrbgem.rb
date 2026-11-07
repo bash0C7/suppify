@@ -87,7 +87,8 @@ class TestMrbgem < Test::Unit::TestCase
     dir = Suppify::Mrbgem.write(@lib, @tmp, newlib: true)
     assert_equal %w[src/newlib/sp_newlib.c src/newlib/sys/mman.h], files(dir).grep(/newlib/)
     rake = File.read(File.join(dir, "mrbgem.rake"))
-    assert_include rake, %(spec.cc.include_paths.unshift(newlib, "\#{dir}/src"))
+    assert_include rake, %(spec.cc.include_paths.unshift(newlib)\n)
+    assert_include rake, %(spec.cc.include_paths << "\#{dir}/src")
     assert_include rake, %(spec.cc.defines.concat(%w[SP_NO_SIGNALS SP_NO_TERMIOS]))
     assert_not_include rake, "_DEFAULT_SOURCE"
     assert_include rake, %(spec.cc.flags << "-include \#{newlib}/sp_newlib_config.h")

@@ -4,7 +4,7 @@ class TestNewlibIntegration < Test::Unit::TestCase
   ARCH = %w[-mcpu=cortex-a9 -marm].freeze
 
   def test_the_gem_runs_on_a_32_bit_newlib_board
-    omit("spinel, arm-none-eabi-gcc and qemu-arm are required") if [Fixtures.spinel, Fixtures.which("arm-none-eabi-gcc"), Fixtures.which("qemu-arm")].any?(&:empty?)
+    omit("spinel and arm-none-eabi-gcc are required") if [Fixtures.spinel, Fixtures.which("arm-none-eabi-gcc")].any?(&:empty?)
     Dir.mktmpdir do |dir|
       gem = nil
       capture_output { gem = Fixtures.calc_gem(dir, "--newlib", "--cc", "arm-none-eabi-gcc") }
@@ -20,6 +20,7 @@ class TestNewlibIntegration < Test::Unit::TestCase
       end
       out, status = Open3.capture2e("arm-none-eabi-gcc", *ARCH, "--specs=rdimon.specs", "-Wl,--gc-sections", *objs, "-lm", "-o", "#{dir}/host.elf")
       assert status.success?, out
+      omit("qemu-arm is required to run the board program") if Fixtures.which("qemu-arm").empty?
       out, = Open3.capture2e("qemu-arm", "#{dir}/host.elf")
       assert_equal format(TestCallIntegration::EXPECTED, "-4"), out
     end
