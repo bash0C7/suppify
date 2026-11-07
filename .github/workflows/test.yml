@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 60
     env:
       PICORUBY_REF: e52681800130b8270f1e821b907454860568a011
+      APT_KEY: apt-arm-qemu-1
     steps:
       - uses: actions/checkout@v6
 
@@ -26,11 +27,12 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      - name: Cache apt archives
-        uses: actions/cache@v6
+      - name: Restore apt archives
+        id: apt
+        uses: actions/cache/restore@v6
         with:
           path: ~/apt-archives
-          key: apt-${{ runner.os }}-arm-qemu-1
+          key: ${{ runner.os }}-${{ env.APT_KEY }}
 
       - name: Install the ARM toolchain and qemu-user
         run: |
@@ -40,14 +42,19 @@ jobs:
             gcc-arm-none-eabi libnewlib-arm-none-eabi qemu-user
           sudo chown -R "$USER" "$HOME/apt-archives"
 
-      - name: Let qemu-user load low addresses
-        run: |
-          sysctl vm.mmap_min_addr
-          sudo sysctl -w vm.mmap_min_addr=4096
+      - name: Save apt archives
+        if: steps.apt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/apt-archives
+          key: ${{ runner.os }}-${{ env.APT_KEY }}
 
-      - name: Cache spinel
+      - name: Let qemu-user map the board ELF at address 0
+        run: sudo sysctl -w vm.mmap_min_addr=0
+
+      - name: Restore spinel
         id: spinel
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/spinel
           key: spinel-${{ runner.os }}-${{ steps.pin.outputs.spinel }}
@@ -62,9 +69,16 @@ jobs:
           make -C "$HOME/spinel" deps
           make -C "$HOME/spinel" -j"$(getconf _NPROCESSORS_ONLN)"
 
-      - name: Cache PicoRuby
+      - name: Save spinel
+        if: steps.spinel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/spinel
+          key: spinel-${{ runner.os }}-${{ steps.pin.outputs.spinel }}
+
+      - name: Restore PicoRuby
         id: picoruby
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: picoruby
           key: picoruby-${{ env.PICORUBY_REF }}
@@ -77,6 +91,13 @@ jobs:
           ref: ${{ env.PICORUBY_REF }}
           submodules: recursive
           path: picoruby
+
+      - name: Save PicoRuby
+        if: steps.picoruby.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: picoruby
+          key: picoruby-${{ env.PICORUBY_REF }}
 
       - name: Test
         shell: bash
