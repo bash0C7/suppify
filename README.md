@@ -45,9 +45,8 @@ ruby suppify.rb kernel.rb Calc.add Calc.greet -o calc -d build
 - **`-o NAME`**: the gem name (`picoruby-NAME`) and the C prefix. The default is the kernel's basename.
 - **`-d DIR`**: the output directory. The default is `.`.
 - **`--license ID`**: `spec.license`. The default is `MIT`.
-- **`--newlib`**: build for a board whose C library is newlib (see [Boards with newlib](#boards-with-newlib)).
 - **`--cc CMD`**: the board's C compiler. Every spinel run gets it as `--cc=CMD`, and spinel takes the
-  Integer width from it.
+  Integer width and the board's build flags from it (see [Boards with newlib](#boards-with-newlib)).
 - **`--workers K`**, **`--table NAME`**, **`--no-vm`**: the callers outside the VM (see
   [Callers and instances](#callers-and-instances)).
 
@@ -222,20 +221,20 @@ extern const suppify_kernel_t calc_kernels[];
 
 ## Boards with newlib
 
-`--newlib` copies spinel's `lib/newlib` into `src/newlib`. Pass the board's compiler as `--cc`:
-without it spinel emits C for the host's 64-bit Integer, and it accepts programs that use `Thread`,
-`Mutex`, `Queue` or `ConditionVariable`, which newlib cannot run.
+Pass the board's compiler as `--cc`. When it is a newlib compiler, spinel's `--print-build` reports the
+newlib build, and suppify copies spinel's `lib/newlib` into `src/newlib`. Without `--cc`, spinel emits C
+for the host's 64-bit Integer and accepts programs that use `Thread`, `Mutex`, `Queue` or
+`ConditionVariable`, which newlib cannot run.
 
 ```sh
-ruby suppify.rb kernel.rb Calc.add -o calc --newlib --cc arm-none-eabi-gcc
+ruby suppify.rb kernel.rb Calc.add -o calc --cc arm-none-eabi-gcc
 ```
 
 The gem's build then:
 
 - puts `src/newlib` first on the include path;
-- defines `SP_NO_SIGNALS` and `SP_NO_TERMIOS`;
-- force-includes `sp_newlib_config.h`, which sizes the runtime's tables and first GC triggers for a small heap;
-- links `sp_newlib.c`, which holds weak stubs for the system calls the board lacks.
+- defines what `--print-build` reports (`SP_NO_SIGNALS`, `SP_NO_TERMIOS`, ...);
+- force-includes `sp_newlib_config.h`, which sizes the runtime's tables and first GC triggers for a small heap.
 
 spinel's `docs/newlib.md` describes the settings and how to override them.
 
@@ -252,9 +251,9 @@ The integration tests run when their tools are present:
 |---|---|
 | `test_spinel_integration.rb` | spinel (`SPINEL` or `PATH`) |
 | `test_call_integration.rb` | spinel, `cc` |
-| `test_newlib_integration.rb` | spinel, `arm-none-eabi-gcc`, `qemu-arm` |
+| `test_newlib_integration.rb` | spinel, `arm-none-eabi-gcc`; the board run also `qemu-arm` |
 | `test_picoruby_integration.rb` | spinel, `cc`, a PicoRuby checkout in `PICORUBY_ROOT` |
-| `test_example_integration.rb` | spinel, `cc`, `PICORUBY_ROOT`; the board run also `arm-none-eabi-gcc` with newlib and `qemu-arm` |
+| `test_example_integration.rb` | spinel, `cc`, `PICORUBY_ROOT`; the board build also `arm-none-eabi-gcc` with newlib, and the board run `qemu-arm` |
 
 `rakelib/spinel.rake` tracks `spinel.pin`:
 

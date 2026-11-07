@@ -10,8 +10,9 @@ module Suppify
     def func = "#{mod}_#{cname.delete_prefix("sp_#{mod}_s_")}"
   end
 
-  # What spinel's library output gives for one kernel.
-  Library = Data.define(:name, :kernel_c, :kernel_h, :entries, :runtime_dir, :defines, :cflags, :libs, :ldflags, :sources)
+  # What spinel's library output gives for one kernel. +newlib+ is true when spinel built it for a
+  # board whose C library is newlib, and then +runtime_dir+ holds spinel's `newlib/` header layer.
+  Library = Data.define(:name, :kernel_c, :kernel_h, :entries, :runtime_dir, :defines, :cflags, :libs, :ldflags, :sources, :newlib)
 
   # Drives the spinel compiler and reads its library contract.
   class Spinel
@@ -54,18 +55,23 @@ module Suppify
       JSON.parse(File.read(path)).fetch("symbols").to_h { |s| [s["ruby"], s["c"]] }
     end
 
-    #: (String) -> { runtime_dir: String, defines: Array[String], cflags: Array[String], libs: Array[String], ldflags: Array[String], sources: Array[String] }
+    # Reads `--print-build` into the build settings. A report that lists the runtime's `newlib/`
+    # directory sets +newlib+, and its `-include` of `newlib/sp_newlib_config.h` stays out of +cflags+.
+    #: (String) -> { runtime_dir: String, defines: Array[String], cflags: Array[String], libs: Array[String], ldflags: Array[String], sources: Array[String], newlib: bool }
     def build_report(text)
       lines = text.lines.map { |l| l.chomp.split(" ", 2) }
       values = ->(kind) { lines.filter_map { |k, v| v if k == kind } }
       runtime = values.("runtime").first or raise Error, "spinel did not report its runtime"
+      runtime_dir = File.dirname(runtime)
+      newlib = File.join(runtime_dir, "newlib")
       libs, ldflags = values.("lib").partition { _1.start_with?("-l") }
-      { runtime_dir: File.dirname(runtime),
+      { runtime_dir:,
         defines: values.("define").map { _1.delete_prefix("-D") },
-        cflags: values.("cflag"),
+        cflags: values.("cflag") - ["-include #{newlib}/sp_newlib_config.h"],
         libs: libs.map { _1.delete_prefix("-l") },
         ldflags:,
-        sources: values.("link").map { source_of(_1) } }
+        sources: values.("link").map { source_of(_1) },
+        newlib: values.("include").include?(newlib) }
     end
 
     # The C source of an object spinel links: a package's `sp_<name>.o`, or its `_mt` variant.

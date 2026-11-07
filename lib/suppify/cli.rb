@@ -1,26 +1,26 @@
 module Suppify
-  # `suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib] [--cc cmd]
+  # `suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--cc cmd]
   #  [--no-vm] [--workers k] [--table name]`
   module CLI
     module_function
 
-    USAGE = "usage: suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib] [--cc cmd] " \
+    USAGE = "usage: suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--cc cmd] " \
             "[--no-vm] [--workers k] [--table name]".freeze
 
     #: (Array[String], ?spinel: Spinel) -> Integer
     def run(argv, spinel: Spinel.new)
       opts = parse(argv)
       lib = spinel.compile(opts[:kernel], opts[:entries], name: opts[:name], cc: opts[:cc])
-      dir = Mrbgem.write(lib, opts[:out_dir], **opts.slice(:license, :newlib, :vm, :workers, :table))
+      dir = Mrbgem.write(lib, opts[:out_dir], **opts.slice(:license, :vm, :workers, :table))
       puts "wrote #{dir} (#{lib.entries.length} entries)"
       0
     end
 
-    #: (Array[String]) -> { kernel: String, entries: Array[String], name: String, out_dir: String, license: String, newlib: bool, cc: String?, vm: bool, workers: Integer, table: String? }
+    #: (Array[String]) -> { kernel: String, entries: Array[String], name: String, out_dir: String, license: String, cc: String?, vm: bool, workers: Integer, table: String? }
     def parse(argv)
       flags = { "-o" => :name, "-d" => :out_dir, "--license" => :license, "--cc" => :cc, "--workers" => :workers, "--table" => :table }
-      switches = { "--newlib" => [:newlib, true], "--no-vm" => [:vm, false] }
-      opts = { out_dir: ".", license: "MIT", newlib: false, cc: nil, vm: true, workers: nil, table: nil }
+      switches = { "--no-vm" => [:vm, false] }
+      opts = { out_dir: ".", license: "MIT", cc: nil, vm: true, workers: nil, table: nil }
       words = []
       args = argv.dup
       while (arg = args.shift)

@@ -6,7 +6,7 @@ description: Use when checking whether suppify still tracks matz/spinel's curren
 # spinel-tracking: keep suppify verified against one spinel commit
 
 `spinel.pin` names the one commit of bash0C7/spinel suppify is verified against. The fork is
-matz/spinel plus `lib/newlib` on its `newlib-runtime` branch. spinel is an external tool;
+matz/spinel plus `lib/newlib` on its `newlib-runtime-pr` branch. spinel is an external tool;
 `rakelib/spinel.rake` clones the fork into a temporary directory to verify a ref.
 
 ## Rake tasks
@@ -19,8 +19,8 @@ rake spinel:bump_pin[<ref>]     # check_pin[<ref>], then write spinel.pin when i
 
 ## Procedure
 
-1. **Compare** `rake spinel:latest` with the base of `newlib-runtime` in the fork. When they match, tracking is current.
-2. **Rebase** `newlib-runtime` onto matz/spinel's master and push it to the fork.
+1. **Compare** `rake spinel:latest` with the base of `newlib-runtime-pr` in the fork. When they match, tracking is current.
+2. **Rebase** `newlib-runtime-pr` onto matz/spinel's master and push it to the fork.
 3. **Verify** with `rake spinel:check_pin[<rebased sha>]`. A failing run keeps its clone and prints the path.
 4. **When green**, run `rake spinel:bump_pin[<rebased sha>]` and commit `spinel.pin`. The commit message
    names the spinel ref and any change it took to reach green.
@@ -34,7 +34,7 @@ rake spinel:bump_pin[<ref>]     # check_pin[<ref>], then write spinel.pin when i
    - **The glue fails to compile**: compare the runtime API the glue calls (`SP_GC_SAVE`,
      `SP_GC_ROOT`, `SP_STR_HDL`, `sp_str_from_bytes`, `sp_str_byte_len`, `<name>_spinel_try`)
      with the clone's `lib/spinel_rt.h`.
-   - **The newlib test fails**: fix `lib/newlib` on the fork's `newlib-runtime` branch.
+   - **The newlib test fails**: fix `lib/newlib` on the fork's `newlib-runtime-pr` branch.
    - Re-run `check_pin` after each fix until green, then do step 4.
 
 ## Integration tests
@@ -44,9 +44,9 @@ host may skip:
 
 - `PICORUBY_ROOT=<picoruby checkout>` runs `test_picoruby_integration.rb` and
   `test_example_integration.rb` on both VMs.
-- `arm-none-eabi-gcc` with newlib and `qemu-arm` on `PATH` run `test_newlib_integration.rb` and the
-  board run of `test_example_integration.rb`. `qemu-arm` runs on a Linux host only; on macOS, run the
-  suite in a Linux container.
+- `arm-none-eabi-gcc` with newlib on `PATH` builds and links the board gem in
+  `test_newlib_integration.rb` and `test_example_integration.rb`. With `qemu-arm` also on `PATH`, they
+  run the program. `qemu-arm` runs on a Linux host only; on macOS, run the suite in a Linux container.
 
 ## Downstream
 

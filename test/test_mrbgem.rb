@@ -9,7 +9,7 @@ class TestMrbgem < Test::Unit::TestCase
       "spinel_rt.h" => "rt", "sp_gc.c" => "gc",
       "regexp/re_compile.c" => "#include <mruby.h>\n#include <mruby/string.h>\n#include <string.h>\n",
       "regexp/shim/mruby.h" => "shim", "regexp/shim/mruby/string.h" => %(#include "../mruby.h"\n),
-      "newlib/sp_newlib.c" => "stubs", "newlib/sys/mman.h" => "mman",
+      "newlib/sp_newlib_config.h" => "config", "newlib/sys/mman.h" => "mman",
       "spinel/runtime.h" => %(#include "sp_gc.h"\n#include <stdint.h>\n),
       "../packages/base64/sp_base64.c" => %(#include "spinel/runtime.h"\n),
     }.each do |f, body|
@@ -83,16 +83,16 @@ class TestMrbgem < Test::Unit::TestCase
     assert_not_include rake, "newlib"
   end
 
-  def test_newlib_adds_spinel_s_board_layer
-    dir = Suppify::Mrbgem.write(@lib, @tmp, newlib: true)
-    assert_equal %w[src/newlib/sp_newlib.c src/newlib/sys/mman.h], files(dir).grep(/newlib/)
+  def test_a_newlib_library_gets_spinel_s_header_layer
+    lib = @lib.with(newlib: true, defines: ["SP_ONE_STRING", "SP_NO_SIGNALS"])
+    dir = Suppify::Mrbgem.write(lib, @tmp)
+    assert_equal %w[src/newlib/sp_newlib_config.h src/newlib/sys/mman.h], files(dir).grep(/newlib/)
     rake = File.read(File.join(dir, "mrbgem.rake"))
+    assert_include rake, %(spec.cc.defines.concat(["SP_ONE_STRING", "SP_NO_SIGNALS", "BOARD=1"]))
     assert_include rake, %(spec.cc.include_paths.unshift(newlib)\n)
-    assert_include rake, %(spec.cc.include_paths << "\#{dir}/src")
-    assert_include rake, %(spec.cc.defines.concat(%w[SP_NO_SIGNALS SP_NO_TERMIOS]))
-    assert_not_include rake, "_DEFAULT_SOURCE"
     assert_include rake, %(spec.cc.flags << "-include \#{newlib}/sp_newlib_config.h")
-    assert_include rake, %(file(stubs => "\#{newlib}/sp_newlib.c"))
+    assert_not_include rake, "src\""
+    assert_not_include rake, "sp_newlib.c"
     assert_not_include rake, "crypt"
   end
 
