@@ -46,7 +46,10 @@ host may skip:
   `test_example_integration.rb` on both VMs.
 - `arm-none-eabi-gcc` with newlib on `PATH` builds and links the board gem in
   `test_newlib_integration.rb` and `test_example_integration.rb`. With `qemu-arm` also on `PATH`, they
-  run the program. `qemu-arm` runs on a Linux host only; on macOS, run the suite in a Linux container.
+  run the program. `qemu-arm` runs on a Linux host only.
+
+`.github/workflows/test.yml` runs the whole suite on ubuntu with all of these tools on every push, and
+fails when a test is omitted. After pushing the commit that changes `spinel.pin`, read that run's result.
 
 ## Downstream
 
