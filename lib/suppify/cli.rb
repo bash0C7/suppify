@@ -1,26 +1,26 @@
 module Suppify
-  # `suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib]
+  # `suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib] [--cc cmd]
   #  [--no-vm] [--workers k] [--table name]`
   module CLI
     module_function
 
-    USAGE = "usage: suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib] " \
+    USAGE = "usage: suppify <kernel.rb> <Mod.method>... [-o name] [-d out_dir] [--license id] [--newlib] [--cc cmd] " \
             "[--no-vm] [--workers k] [--table name]".freeze
 
     #: (Array[String], ?spinel: Spinel) -> Integer
     def run(argv, spinel: Spinel.new)
       opts = parse(argv)
-      lib = spinel.compile(opts[:kernel], opts[:entries], name: opts[:name])
+      lib = spinel.compile(opts[:kernel], opts[:entries], name: opts[:name], cc: opts[:cc])
       dir = Mrbgem.write(lib, opts[:out_dir], **opts.slice(:license, :newlib, :vm, :workers, :table))
       puts "wrote #{dir} (#{lib.entries.length} entries)"
       0
     end
 
-    #: (Array[String]) -> { kernel: String, entries: Array[String], name: String, out_dir: String, license: String, newlib: bool, vm: bool, workers: Integer, table: String? }
+    #: (Array[String]) -> { kernel: String, entries: Array[String], name: String, out_dir: String, license: String, newlib: bool, cc: String?, vm: bool, workers: Integer, table: String? }
     def parse(argv)
-      flags = { "-o" => :name, "-d" => :out_dir, "--license" => :license, "--workers" => :workers, "--table" => :table }
+      flags = { "-o" => :name, "-d" => :out_dir, "--license" => :license, "--cc" => :cc, "--workers" => :workers, "--table" => :table }
       switches = { "--newlib" => [:newlib, true], "--no-vm" => [:vm, false] }
-      opts = { out_dir: ".", license: "MIT", newlib: false, vm: true, workers: nil, table: nil }
+      opts = { out_dir: ".", license: "MIT", newlib: false, cc: nil, vm: true, workers: nil, table: nil }
       words = []
       args = argv.dup
       while (arg = args.shift)

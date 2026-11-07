@@ -20,18 +20,20 @@ module Suppify
       @bin = bin
     end
 
-    # Compiles +kernel+ into a library named +name+ exporting +entries+ (`Mod.method`).
-    #: (String, Array[String], name: String) -> Library
-    def compile(kernel, entries, name:)
+    # Compiles +kernel+ into a library named +name+ exporting +entries+ (`Mod.method`). +cc+ is the
+    # board's C compiler; every spinel run gets it as `--cc=<cc>`, so spinel sizes Integer to that target.
+    #: (String, Array[String], name: String, ?cc: String?) -> Library
+    def compile(kernel, entries, name:, cc: nil)
       kernel = File.expand_path(kernel)
+      target = cc ? ["--cc=#{cc}"] : []
       Dir.mktmpdir do |dir|
         c_path = File.join(dir, "#{name}_spinel.c")
-        run(dir, kernel, "-c", "--no-line-map", "--ext-init", "#{name}_spinel",
+        run(dir, kernel, *target, "-c", "--no-line-map", "--ext-init", "#{name}_spinel",
             "--ext-entry", entries.join(","), "-o", c_path)
-        run(dir, kernel, "--emit-symbol-map")
+        run(dir, kernel, *target, "--emit-symbol-map")
         cnames = symbol_map(Dir[File.join(dir, "*.symbols.json")].first)
         header = File.read(c_path.sub(/\.c\z/, ".h"))
-        build = build_report(run(dir, kernel, "--print-build"))
+        build = build_report(run(dir, kernel, *target, "--print-build"))
         Library.new(name:, kernel_c: File.read(c_path), kernel_h: header,
                     entries: entries.map { |e| entry(e, cnames, header) }, **build)
       end

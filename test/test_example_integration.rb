@@ -58,7 +58,7 @@ class TestExampleIntegration < Test::Unit::TestCase
   def test_the_example_runs_on_a_newlib_board
     omit("arm-none-eabi-gcc and qemu-arm are required") if Fixtures.which("arm-none-eabi-gcc").empty? || Fixtures.which("qemu-arm").empty?
     Dir.mktmpdir do |dir|
-      gem = generate(dir, "--newlib")
+      gem = generate(dir, "--newlib", "--cc", "arm-none-eabi-gcc")
       build(dir, <<~RB)
         MRuby::CrossBuild.new("board") do |conf|
           conf.toolchain("gcc")

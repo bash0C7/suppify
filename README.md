@@ -46,6 +46,8 @@ ruby suppify.rb kernel.rb Calc.add Calc.greet -o calc -d build
 - **`-d DIR`**: the output directory. The default is `.`.
 - **`--license ID`**: `spec.license`. The default is `MIT`.
 - **`--newlib`**: build for a board whose C library is newlib (see [Boards with newlib](#boards-with-newlib)).
+- **`--cc CMD`**: the board's C compiler. Every spinel run gets it as `--cc=CMD`, and spinel takes the
+  Integer width from it.
 - **`--workers K`**, **`--table NAME`**, **`--no-vm`**: the callers outside the VM (see
   [Callers and instances](#callers-and-instances)).
 
@@ -220,10 +222,18 @@ extern const suppify_kernel_t calc_kernels[];
 
 ## Boards with newlib
 
-`--newlib` copies spinel's `lib/newlib` into `src/newlib`. The gem's build then:
+`--newlib` copies spinel's `lib/newlib` into `src/newlib`. Pass the board's compiler as `--cc`:
+without it spinel emits C for the host's 64-bit Integer, and it accepts programs that use `Thread`,
+`Mutex`, `Queue` or `ConditionVariable`, which newlib cannot run.
+
+```sh
+ruby suppify.rb kernel.rb Calc.add -o calc --newlib --cc arm-none-eabi-gcc
+```
+
+The gem's build then:
 
 - puts `src/newlib` first on the include path;
-- defines `_DEFAULT_SOURCE`;
+- defines `SP_NO_SIGNALS` and `SP_NO_TERMIOS`;
 - force-includes `sp_newlib_config.h`, which sizes the runtime's tables and first GC triggers for a small heap;
 - links `sp_newlib.c`, which holds weak stubs for the system calls the board lacks.
 

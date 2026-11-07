@@ -115,7 +115,7 @@ module Suppify
       board = <<~RUBY if newlib
         newlib = "\#{dir}/src/newlib"
         spec.cc.include_paths.unshift(newlib)
-        spec.cc.defines << "_DEFAULT_SOURCE"
+        spec.cc.defines.concat(%w[SP_NO_SIGNALS SP_NO_TERMIOS])
         spec.cc.flags << "-include \#{newlib}/sp_newlib_config.h"
         stubs = objfile("\#{build_dir}/src/newlib/sp_newlib")
         spec.objs << stubs

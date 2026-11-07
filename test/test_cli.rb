@@ -4,7 +4,7 @@ class TestCLI < Test::Unit::TestCase
   def parse(*argv) = Suppify::CLI.parse(argv)
 
   def test_defaults
-    assert_equal({ kernel: "k/calc.rb", entries: ["Calc.add", "Calc.even?"], name: "calc", out_dir: ".", license: "MIT", newlib: false,
+    assert_equal({ kernel: "k/calc.rb", entries: ["Calc.add", "Calc.even?"], name: "calc", out_dir: ".", license: "MIT", newlib: false, cc: nil,
                    vm: true, workers: 0, table: nil },
                  parse("k/calc.rb", "Calc.add", "Calc.even?"))
   end
@@ -22,6 +22,7 @@ class TestCLI < Test::Unit::TestCase
   def test_flags
     opts = parse("calc.rb", "-o", "fast", "Calc.add", "-d", "out", "--license", "BSD-2-Clause", "--newlib")
     assert_equal ["fast", "out", "BSD-2-Clause", true], opts.values_at(:name, :out_dir, :license, :newlib)
+    assert_equal "arm-none-eabi-gcc", parse("calc.rb", "Calc.add", "--cc", "arm-none-eabi-gcc")[:cc]
   end
 
   def test_rejects_missing_entries_and_values
