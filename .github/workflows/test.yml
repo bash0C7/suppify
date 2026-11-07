@@ -40,6 +40,11 @@ jobs:
             gcc-arm-none-eabi libnewlib-arm-none-eabi qemu-user
           sudo chown -R "$USER" "$HOME/apt-archives"
 
+      - name: Let qemu-user load low addresses
+        run: |
+          sysctl vm.mmap_min_addr
+          sudo sysctl -w vm.mmap_min_addr=4096
+
       - name: Cache spinel
         id: spinel
         uses: actions/cache@v6
