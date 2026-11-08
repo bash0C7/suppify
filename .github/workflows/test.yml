@@ -64,8 +64,9 @@ jobs:
         env:
           SPINEL_REF: ${{ steps.pin.outputs.spinel }}
         run: |
-          git clone https://github.com/bash0C7/spinel "$HOME/spinel"
-          git -C "$HOME/spinel" checkout "$SPINEL_REF"
+          git init -q "$HOME/spinel"
+          git -C "$HOME/spinel" fetch -q --depth 1 https://github.com/bash0C7/spinel "$SPINEL_REF"
+          git -C "$HOME/spinel" checkout -q FETCH_HEAD
           make -C "$HOME/spinel" deps
           make -C "$HOME/spinel" -j"$(getconf _NPROCESSORS_ONLN)"
 
