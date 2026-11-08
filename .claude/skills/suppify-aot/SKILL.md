@@ -47,10 +47,10 @@ A firmware links one suppify gem, so all of its kernels go into this one file.
 ## 3. Generate the gem
 
 ```sh
-SPINEL=/path/to/spinel ruby /path/to/suppify/suppify.rb kernel.rb Mykernel.run -o mykernel -d build [--newlib]
+SPINEL=/path/to/spinel ruby /path/to/suppify/suppify.rb kernel.rb Mykernel.run -o mykernel -d build [--cc <board's gcc>]
 ```
 
-Use `--newlib` for a board whose C library is newlib. Edit `kernel.rb` and regenerate;
+Pass the board's compiler as `--cc` for a board whose C library is newlib. Edit `kernel.rb` and regenerate;
 the generated files stay untouched.
 
 ## 4. Wire the switch

@@ -36,6 +36,18 @@ class TestSpinelIntegration < Test::Unit::TestCase
     assert_equal ["sp_base64.c"], lib.sources.map { File.basename(_1) }
   end
 
+  def test_a_board_compiler_makes_a_newlib_library
+    omit("arm-none-eabi-gcc is required") if Fixtures.which("arm-none-eabi-gcc").empty?
+    host = @spinel.compile(Fixtures::CALC, Fixtures::CALC_ENTRIES, name: "calc")
+    board = @spinel.compile(Fixtures::CALC, Fixtures::CALC_ENTRIES, name: "calc", cc: "arm-none-eabi-gcc")
+    assert_equal [false, true], [host.newlib, board.newlib]
+    assert File.directory?(File.join(board.runtime_dir, "newlib"))
+    assert_include board.defines, "SP_NO_SIGNALS"
+    assert_include board.defines, "SP_NO_TERMIOS"
+    assert_not_include host.defines, "SP_NO_SIGNALS"
+    assert_equal ["-ffp-contract=off"], board.cflags
+  end
+
   def test_an_entry_the_kernel_does_not_define_fails
     assert_raise(Suppify::Error) { @spinel.compile(Fixtures::CALC, %w[Calc.nope], name: "calc") }
   end

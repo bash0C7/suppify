@@ -56,9 +56,9 @@ class TestExampleIntegration < Test::Unit::TestCase
   end
 
   def test_the_example_runs_on_a_newlib_board
-    omit("arm-none-eabi-gcc and qemu-arm are required") if Fixtures.which("arm-none-eabi-gcc").empty? || Fixtures.which("qemu-arm").empty?
+    omit("arm-none-eabi-gcc is required") if Fixtures.which("arm-none-eabi-gcc").empty?
     Dir.mktmpdir do |dir|
-      gem = generate(dir, "--newlib")
+      gem = generate(dir, "--cc", "arm-none-eabi-gcc")
       build(dir, <<~RB)
         MRuby::CrossBuild.new("board") do |conf|
           conf.toolchain("gcc")
@@ -75,6 +75,7 @@ class TestExampleIntegration < Test::Unit::TestCase
       assert_sealed("arm-none-eabi-nm", "#{dir}/build/board/mrbgems/picoruby-acc/instances/acc_w1.o", gem, "")
       link("arm-none-eabi-gcc", *BOARD, "-Wl,--gc-sections", "--specs=rdimon.specs", "-I#{gem}/include", "#{EXAMPLE}/main.c",
            "#{dir}/build/board/lib/libmruby.a", "-lm", "-o", "#{dir}/main.elf")
+      omit("qemu-arm is required to run the board program") if Fixtures.which("qemu-arm").empty?
       assert_runs(["qemu-arm", "#{dir}/main.elf"])
     end
   end

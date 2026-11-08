@@ -10,8 +10,9 @@ module Suppify
     def func = "#{mod}_#{cname.delete_prefix("sp_#{mod}_s_")}"
   end
 
-  # What spinel's library output gives for one kernel.
-  Library = Data.define(:name, :kernel_c, :kernel_h, :entries, :runtime_dir, :defines, :cflags, :libs, :ldflags, :sources)
+  # What spinel's library output gives for one kernel. +newlib+ is true when spinel built it for a
+  # board whose C library is newlib, and then +runtime_dir+ holds spinel's `newlib/` header layer.
+  Library = Data.define(:name, :kernel_c, :kernel_h, :entries, :runtime_dir, :defines, :cflags, :libs, :ldflags, :sources, :newlib)
 
   # Drives the spinel compiler and reads its library contract.
   class Spinel
@@ -20,18 +21,20 @@ module Suppify
       @bin = bin
     end
 
-    # Compiles +kernel+ into a library named +name+ exporting +entries+ (`Mod.method`).
-    #: (String, Array[String], name: String) -> Library
-    def compile(kernel, entries, name:)
+    # Compiles +kernel+ into a library named +name+ exporting +entries+ (`Mod.method`). +cc+ is the
+    # board's C compiler; every spinel run gets it as `--cc=<cc>`, so spinel sizes Integer to that target.
+    #: (String, Array[String], name: String, ?cc: String?) -> Library
+    def compile(kernel, entries, name:, cc: nil)
       kernel = File.expand_path(kernel)
+      target = cc ? ["--cc=#{cc}"] : []
       Dir.mktmpdir do |dir|
         c_path = File.join(dir, "#{name}_spinel.c")
-        run(dir, kernel, "-c", "--no-line-map", "--ext-init", "#{name}_spinel",
+        run(dir, kernel, *target, "-c", "--no-line-map", "--ext-init", "#{name}_spinel",
             "--ext-entry", entries.join(","), "-o", c_path)
-        run(dir, kernel, "--emit-symbol-map")
+        run(dir, kernel, *target, "--emit-symbol-map")
         cnames = symbol_map(Dir[File.join(dir, "*.symbols.json")].first)
         header = File.read(c_path.sub(/\.c\z/, ".h"))
-        build = build_report(run(dir, kernel, "--print-build"))
+        build = build_report(run(dir, kernel, *target, "--print-build"))
         Library.new(name:, kernel_c: File.read(c_path), kernel_h: header,
                     entries: entries.map { |e| entry(e, cnames, header) }, **build)
       end
@@ -52,18 +55,23 @@ module Suppify
       JSON.parse(File.read(path)).fetch("symbols").to_h { |s| [s["ruby"], s["c"]] }
     end
 
-    #: (String) -> { runtime_dir: String, defines: Array[String], cflags: Array[String], libs: Array[String], ldflags: Array[String], sources: Array[String] }
+    # Reads `--print-build` into the build settings. A report that lists the runtime's `newlib/`
+    # directory sets +newlib+, and its `-include` of `newlib/sp_newlib_config.h` stays out of +cflags+.
+    #: (String) -> { runtime_dir: String, defines: Array[String], cflags: Array[String], libs: Array[String], ldflags: Array[String], sources: Array[String], newlib: bool }
     def build_report(text)
       lines = text.lines.map { |l| l.chomp.split(" ", 2) }
       values = ->(kind) { lines.filter_map { |k, v| v if k == kind } }
       runtime = values.("runtime").first or raise Error, "spinel did not report its runtime"
+      runtime_dir = File.dirname(runtime)
+      newlib = File.join(runtime_dir, "newlib")
       libs, ldflags = values.("lib").partition { _1.start_with?("-l") }
-      { runtime_dir: File.dirname(runtime),
+      { runtime_dir:,
         defines: values.("define").map { _1.delete_prefix("-D") },
-        cflags: values.("cflag"),
+        cflags: values.("cflag") - ["-include #{newlib}/sp_newlib_config.h"],
         libs: libs.map { _1.delete_prefix("-l") },
         ldflags:,
-        sources: values.("link").map { source_of(_1) } }
+        sources: values.("link").map { source_of(_1) },
+        newlib: values.("include").include?(newlib) }
     end
 
     # The C source of an object spinel links: a package's `sp_<name>.o`, or its `_mt` variant.
