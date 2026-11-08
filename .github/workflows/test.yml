@@ -1,0 +1,113 @@
+name: test
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PICORUBY_REF: e52681800130b8270f1e821b907454860568a011
+      APT_KEY: apt-arm-qemu-1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read spinel.pin
+        id: pin
+        run: echo "spinel=$(cat spinel.pin)" >> "$GITHUB_OUTPUT"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Restore apt archives
+        id: apt
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/apt-archives
+          key: ${{ runner.os }}-${{ env.APT_KEY }}
+
+      - name: Install the ARM toolchain and qemu-user
+        run: |
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 -o Dir::Cache::archives="$HOME/apt-archives" install -y \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi qemu-user
+          sudo chown -R "$USER" "$HOME/apt-archives"
+
+      - name: Save apt archives
+        if: steps.apt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/apt-archives
+          key: ${{ runner.os }}-${{ env.APT_KEY }}
+
+      - name: Let qemu-user map the board ELF at address 0
+        run: sudo sysctl -w vm.mmap_min_addr=0
+
+      - name: Restore spinel
+        id: spinel
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/spinel
+          key: spinel-${{ runner.os }}-${{ steps.pin.outputs.spinel }}
+
+      - name: Build spinel
+        if: steps.spinel.outputs.cache-hit != 'true'
+        env:
+          SPINEL_REF: ${{ steps.pin.outputs.spinel }}
+        run: |
+          git init -q "$HOME/spinel"
+          git -C "$HOME/spinel" fetch -q --depth 1 https://github.com/bash0C7/spinel "$SPINEL_REF"
+          git -C "$HOME/spinel" checkout -q FETCH_HEAD
+          make -C "$HOME/spinel" deps
+          make -C "$HOME/spinel" -j"$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Save spinel
+        if: steps.spinel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/spinel
+          key: spinel-${{ runner.os }}-${{ steps.pin.outputs.spinel }}
+
+      - name: Restore PicoRuby
+        id: picoruby
+        uses: actions/cache/restore@v6
+        with:
+          path: picoruby
+          key: picoruby-${{ env.PICORUBY_REF }}
+
+      - name: Check out PicoRuby
+        if: steps.picoruby.outputs.cache-hit != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: picoruby/picoruby
+          ref: ${{ env.PICORUBY_REF }}
+          submodules: recursive
+          path: picoruby
+
+      - name: Save PicoRuby
+        if: steps.picoruby.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: picoruby
+          key: picoruby-${{ env.PICORUBY_REF }}
+
+      - name: Test
+        shell: bash
+        env:
+          PICORUBY_ROOT: ${{ github.workspace }}/picoruby
+        run: |
+          export SPINEL="$HOME/spinel/spinel"
+          bundle exec rake test 2>&1 | tee "$RUNNER_TEMP/test.log"
+          if grep -q '^Omission' "$RUNNER_TEMP/test.log"; then
+            echo "::error::a test was omitted; every tool it needs is installed here"
+            exit 1
+          fi
